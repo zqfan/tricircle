@@ -813,6 +813,9 @@ class Connection(pymongo_base.Connection):
         else:
             return self._get_floating_resources(query, metaquery, resource)
 
+    def record_resource(self, resource):
+        self.db.resource.insert(resource)
+
     def delete_resource(self, resource_id):
         self.db.resource.remove({"_id": resource_id})
 

@@ -880,7 +880,86 @@ class MeterController(rest.RestController):
         :param q: Filter rules for the data to be returned.
         :param limit: Maximum number of samples to return.
         """
-        raise ceilometer.NotImplementedError()
+        q = q or []
+        if limit and limit < 0:
+            raise ClientSideError(_("Limit must be positive"))
+
+        # we only support single resource query
+        resource_query = None
+        for query in q:
+            if query.field in ('resource', 'resource_id'):
+                resource_query = query
+                break
+        else:
+            raise wsme.exc.ClientSideError("you must specify a resource id")
+
+        #TODO(zqfan): check resource belong to this project and user
+        resource_id = resource_query.value
+        resource = pecan.request.storage_conn.get_resource(resource_id)
+        if not resource:
+            raise wsme.exc.ClientSideError("resource not found", 404)
+        if not resource.metadata:
+            pecan.request.storage_conn.delete_resource(resource.resource_id)
+            raise wsme.exc.ClientSideError("resource not found", 404)
+
+        cascaded_id = resource.metadata.get('cascaded_resource_id')
+        if not cascaded_id:
+            raise Exception("cascaded resource not found")
+        resource_query.value = cascaded_id
+
+        region = resource.metadata.get('region')
+        if not region:
+            raise Exception("cascaded region not found")
+
+        _ksclient = ksclient.Client(
+            username=cfg.CONF.service_credentials.os_username,
+            password=cfg.CONF.service_credentials.os_password,
+            tenant_id=cfg.CONF.service_credentials.os_tenant_id,
+            tenant_name=cfg.CONF.service_credentials.os_tenant_name,
+            cacert=cfg.CONF.service_credentials.os_cacert,
+            auth_url=cfg.CONF.service_credentials.os_auth_url,
+            region_name=cfg.CONF.service_credentials.os_region_name,
+            insecure=cfg.CONF.service_credentials.insecure,)
+
+        ceilometer_service_id = []
+        for service in _ksclient.services.list():
+            if service.type == 'metering' and service.enabled is True:
+                ceilometer_service_id.append(service.id)
+
+        if not ceilometer_service_id:
+            raise Exception("No metering service found")
+        if len(ceilometer_service_id) > 1:
+            raise Exception("Multiple metering service found")
+        ceilometer_service_id = ceilometer_service_id[0]
+
+        cascaded_ceilometer_url = []
+        for endpoint in _ksclient.endpoints.list():
+            if (endpoint.region == region
+                and endpoint.service_id == ceilometer_service_id
+                and endpoint.enabled is True):
+                cascaded_ceilometer_url.append(endpoint.publicurl)
+
+        if not cascaded_ceilometer_url:
+            raise Exception("Cascaded ceilometer for %s not found" % region)
+        if len(cascaded_ceilometer_url) > 1:
+            raise Exception(("Region %s exists multiple "
+                             "cascaded ceilometer: %s") % (
+                            cascaded_ceilometer_url, region))
+        cascaded_ceilometer_url = cascaded_ceilometer_url[0]
+
+        kwargs = {
+            "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
+            "ceilometer_url": cascaded_ceilometer_url,
+        }
+        _cmclient = cmclient.get_client(2, **kwargs)
+
+        samples = _cmclient.samples.list(self.meter_name, q, limit)
+        ret = []
+        for sample in samples:
+            sample.resource_id = resource_id
+            ret.append(OldSample(sample.to_dict()))
+
+        return ret
 
     @wsme_pecan.wsexpose([OldSample], body=[OldSample])
     def post(self, samples):
@@ -1393,8 +1472,25 @@ class Resource(_Base):
                    )
 
 
+class ResourceController(rest.RestController):
+
+    def __init__(self, resource_id):
+        pecan.request.context['resource_id'] = resource_id
+        self._id = resource_id
+
+    @wsme_pecan.wsexpose(None, status_code=204)
+    def delete(self):
+        if acl.get_limited_to_project(pecan.request.headers) is not None:
+            raise wsme.exc.ClientSideError("admin required", 401)
+        pecan.request.storage_conn.delete_resource(self._id)
+
+
 class ResourcesController(rest.RestController):
     """Works on resources."""
+
+    @pecan.expose()
+    def _lookup(self, resource_id, *remainder):
+        return ResourceController(resource_id), remainder
 
     def _resource_links(self, resource_id, meter_links=1):
         links = [_make_link('self', pecan.request.host_url, 'resources',
@@ -1413,7 +1509,13 @@ class ResourcesController(rest.RestController):
 
         :param resource_id: The UUID of the resource.
         """
-        raise ceilometer.NotImplementedError()
+        authorized_project = acl.get_limited_to_project(pecan.request.headers)
+        resources = list(pecan.request.storage_conn.get_resources(
+            resource=resource_id, project=authorized_project))
+        if not resources:
+            raise EntityNotFound(_('Resource'), resource_id)
+        return Resource.from_db_and_links(resources[0],
+                                          self._resource_links(resource_id))
 
     @wsme_pecan.wsexpose([Resource], [Query], int)
     def get_all(self, q=None, meter_links=1):
@@ -1422,7 +1524,36 @@ class ResourcesController(rest.RestController):
         :param q: Filter rules for the resources to be returned.
         :param meter_links: option to include related meter links
         """
-        raise ceilometer.NotImplementedError()
+        q = q or []
+        kwargs = _query_to_kwargs(q, pecan.request.storage_conn.get_resources)
+        resources = [
+            Resource.from_db_and_links(r,
+                                       self._resource_links(r.resource_id,
+                                                            meter_links))
+            for r in pecan.request.storage_conn.get_resources(**kwargs)]
+        return resources
+
+    @wsme_pecan.wsexpose(Resource, body=Resource, status_code=201)
+    def post(self, resource):
+        #TODO(zqfan): only admin can call this method
+        if acl.get_limited_to_project(pecan.request.headers) is not None:
+            raise wsme.exc.ClientSideError("admin required", 401)
+        if not resource.resource_id:
+            raise wsme.exc.ClientSideError("missing attribute 'resource_id'")
+        if not resource.source:
+            raise wsme.exc.ClientSideError("missing attribute 'source'")
+        metadata = resource.metadata
+        if 'region' not in metadata:
+            raise wsme.exc.ClientSideError("missing metadata field 'region'")
+        if 'cascaded_resource_id' not in metadata:
+            raise wsme.exc.ClientSideError("missing metadata field 'cascaded_resource_id'")
+        r = resource.as_dict(storage.models.Resource)
+        r['_id'] = r.pop('resource_id')
+        r.setdefault('user_id', None)
+        r.setdefault('project_id', None)
+        r.setdefault('meter', [])
+        pecan.request.storage_conn.record_resource(r)
+        return resource
 
 
 class AlarmThresholdRule(_Base):
