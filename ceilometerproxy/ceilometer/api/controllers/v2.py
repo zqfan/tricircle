@@ -953,11 +953,20 @@ class MeterController(rest.RestController):
         }
         _cmclient = cmclient.get_client(2, **kwargs)
 
-        samples = _cmclient.samples.list(self.meter_name, q, limit)
+        queries = []
+        for query in q:
+            queries.append(query.as_dict())
+        samples = _cmclient.samples.list(self.meter_name, queries, limit)
         ret = []
         for sample in samples:
-            sample.resource_id = resource_id
-            ret.append(OldSample(sample.to_dict()))
+            sample = sample.to_dict()
+            sample['resource_id'] = resource_id
+            try:
+                sample['recorded_at'] = timeutils.parse_isotime(sample['recorded_at'])
+            except ValueError as e:
+                LOG.warn("time format is not standard: %s", e)
+                sample['recorded_at'] = timeutils.parse_isotime(sample['recorded_at'], '%Y-%m-%dT%H:%M:%S')
+            ret.append(OldSample(**sample))
 
         return ret
 
@@ -979,6 +988,96 @@ class MeterController(rest.RestController):
                        period long of that number of seconds.
         :param aggregate: The selectable aggregation functions to be applied.
         """
+        q = q or []
+        groupby = groupby or []
+        aggregate = aggregate or []
+
+        if period and period < 0:
+            raise ClientSideError(_("Period must be positive."))
+
+        # we only support single resource query
+        resource_query = None
+        for query in q:
+            if query.field in ('resource', 'resource_id'):
+                resource_query = query
+                break
+        else:
+            raise wsme.exc.ClientSideError("you must specify a resource id")
+
+        #TODO(zqfan): check resource belong to this project and user
+        resource_id = resource_query.value
+        resource = pecan.request.storage_conn.get_resource(resource_id)
+        if not resource:
+            raise wsme.exc.ClientSideError("resource not found", 404)
+        if not resource.metadata:
+            pecan.request.storage_conn.delete_resource(resource.resource_id)
+            raise wsme.exc.ClientSideError("resource not found", 404)
+
+        cascaded_id = resource.metadata.get('cascaded_resource_id')
+        if not cascaded_id:
+            raise Exception("cascaded resource not found")
+        resource_query.value = cascaded_id
+
+        region = resource.metadata.get('region')
+        if not region:
+            raise Exception("cascaded region not found")
+
+        _ksclient = ksclient.Client(
+            username=cfg.CONF.service_credentials.os_username,
+            password=cfg.CONF.service_credentials.os_password,
+            tenant_id=cfg.CONF.service_credentials.os_tenant_id,
+            tenant_name=cfg.CONF.service_credentials.os_tenant_name,
+            cacert=cfg.CONF.service_credentials.os_cacert,
+            auth_url=cfg.CONF.service_credentials.os_auth_url,
+            region_name=cfg.CONF.service_credentials.os_region_name,
+            insecure=cfg.CONF.service_credentials.insecure,)
+
+        ceilometer_service_id = []
+        for service in _ksclient.services.list():
+            if service.type == 'metering' and service.enabled is True:
+                ceilometer_service_id.append(service.id)
+
+        if not ceilometer_service_id:
+            raise Exception("No metering service found")
+        if len(ceilometer_service_id) > 1:
+            raise Exception("Multiple metering service found")
+        ceilometer_service_id = ceilometer_service_id[0]
+
+        cascaded_ceilometer_url = []
+        for endpoint in _ksclient.endpoints.list():
+            if (endpoint.region == region
+                and endpoint.service_id == ceilometer_service_id
+                and endpoint.enabled is True):
+                cascaded_ceilometer_url.append(endpoint.publicurl)
+
+        if not cascaded_ceilometer_url:
+            raise Exception("Cascaded ceilometer for %s not found" % region)
+        if len(cascaded_ceilometer_url) > 1:
+            raise Exception(("Region %s exists multiple "
+                             "cascaded ceilometer: %s") % (
+                            cascaded_ceilometer_url, region))
+        cascaded_ceilometer_url = cascaded_ceilometer_url[0]
+
+        kwargs = {
+            "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
+            "ceilometer_url": cascaded_ceilometer_url,
+        }
+        _cmclient = cmclient.get_client(2, **kwargs)
+
+        queries = []
+        for query in q:
+            queries.append(query.as_dict())
+        statistics = _cmclient.statistics.list(self.meter_name, q=queries, period=period, groupby=groupby, aggregates=aggregate)
+
+        ret = []
+        for statistic in statistics:
+            statistic = statistic.to_dict()
+            statistic['duration_start'] = timeutils.parse_isotime(statistic['duration_start'])
+            statistic['duration_end'] = timeutils.parse_isotime(statistic['duration_end'])
+            statistic['period_start'] = timeutils.parse_isotime(statistic['period_start'])
+            statistic['period_end'] = timeutils.parse_isotime(statistic['period_end'])
+            ret.append(Statistics(**statistic))
+        return ret
         raise ceilometer.NotImplementedError()
 
 
