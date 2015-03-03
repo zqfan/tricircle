@@ -1078,7 +1078,6 @@ class MeterController(rest.RestController):
             statistic['period_end'] = timeutils.parse_isotime(statistic['period_end'])
             ret.append(Statistics(**statistic))
         return ret
-        raise ceilometer.NotImplementedError()
 
 
 class Meter(_Base):
@@ -1613,6 +1612,8 @@ class ResourcesController(rest.RestController):
             resource=resource_id, project=authorized_project))
         if not resources:
             raise EntityNotFound(_('Resource'), resource_id)
+        resource[0].metadata.pop('region')
+        resource[0].metadata.pop('cascaded_resource_id')
         return Resource.from_db_and_links(resources[0],
                                           self._resource_links(resource_id))
 
@@ -1625,11 +1626,13 @@ class ResourcesController(rest.RestController):
         """
         q = q or []
         kwargs = _query_to_kwargs(q, pecan.request.storage_conn.get_resources)
-        resources = [
-            Resource.from_db_and_links(r,
-                                       self._resource_links(r.resource_id,
-                                                            meter_links))
-            for r in pecan.request.storage_conn.get_resources(**kwargs)]
+        resources = []
+        for resource in pecan.request.storage_conn.get_resources(**kwargs):
+            resource.metadata.pop('region')
+            resource.metadata.pop('cascaded_resource_id')
+            resource_link = self._resource_links(resource.resource_id, meter_links)
+            resource = Resource.from_db_and_links(resource, resource_link)
+            resources.append(resource)
         return resources
 
     @wsme_pecan.wsexpose(Resource, body=Resource, status_code=201)
@@ -1650,6 +1653,7 @@ class ResourcesController(rest.RestController):
         r['_id'] = r.pop('resource_id')
         r.setdefault('user_id', None)
         r.setdefault('project_id', None)
+        #TODO(zqfan): add default meter here
         r.setdefault('meter', [])
         pecan.request.storage_conn.record_resource(r)
         return resource
