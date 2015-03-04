@@ -1586,6 +1586,20 @@ class ResourceController(rest.RestController):
 class ResourcesController(rest.RestController):
     """Works on resources."""
 
+    def __init__(self, *args, **kwargs):
+        super(ResourcesController, self).__init__(*args, **kwargs)
+        self.type2meters = {}
+        try:
+            # This file name should be configurable
+            filepath = cfg.CONF.find_file("type2meters.json")
+            LOG.debug("type2meters.json path: %s", filepath)
+            with open(filepath) as f:
+                self.type2meters = json.loads(f.read())
+                LOG.debug("type2meters.json: %s", self.type2meters)
+        except:
+            LOG.error("Unable to init resource controller, please check %s", filepath)
+            raise
+
     @pecan.expose()
     def _lookup(self, resource_id, *remainder):
         return ResourceController(resource_id), remainder
@@ -1644,17 +1658,27 @@ class ResourcesController(rest.RestController):
             raise wsme.exc.ClientSideError("missing attribute 'resource_id'")
         if not resource.source:
             raise wsme.exc.ClientSideError("missing attribute 'source'")
+
         metadata = resource.metadata
         if 'region' not in metadata:
             raise wsme.exc.ClientSideError("missing metadata field 'region'")
         if 'cascaded_resource_id' not in metadata:
             raise wsme.exc.ClientSideError("missing metadata field 'cascaded_resource_id'")
+        if 'type' not in metadata:
+            raise wsme.exc.ClientSideError("missing metadata field 'type'")
+
+        resource_type = resource.metadata['type']
+        if resource_type not in self.type2meters:
+            msg = ("metadata.type %(type)s is not one of valid types: "
+                   "%(valid_types)s" % {"type": resource_type,
+                                        "valid_types": self.type2meters.keys()})
+            raise wsme.exc.ClientSideError(msg)
+
         r = resource.as_dict(storage.models.Resource)
         r['_id'] = r.pop('resource_id')
         r.setdefault('user_id', None)
         r.setdefault('project_id', None)
-        #TODO(zqfan): add default meter here
-        r.setdefault('meter', [])
+        r.setdefault('meter', self.type2meters[resource_type])
         pecan.request.storage_conn.record_resource(r)
         return resource
 
