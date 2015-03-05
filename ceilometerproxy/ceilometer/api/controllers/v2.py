@@ -82,6 +82,18 @@ operation_kind = ('lt', 'le', 'eq', 'ne', 'ge', 'gt')
 operation_kind_enum = wtypes.Enum(str, *operation_kind)
 
 
+type2meters = {}
+try:
+    # consider make this file name should be configurable?
+    filepath = cfg.CONF.find_file("type2meters.json")
+    LOG.debug("type2meters.json path: %s", filepath)
+    with open(filepath) as f:
+        type2meters = json.loads(f.read())
+        LOG.debug("type2meters.json: %s", type2meters)
+except:
+    LOG.error("Unable to init resource controller, please check %s", filepath)
+
+
 class ClientSideError(wsme.exc.ClientSideError):
     def __init__(self, error, status_code=400):
         pecan.response.translatable_error = error
@@ -976,7 +988,48 @@ class MeterController(rest.RestController):
 
         :param samples: a list of samples within the request body.
         """
-        raise ceilometer.NotImplementedError()
+        # This method is used only by other service in cascading level.
+        # If user want to post samples into database of cascaded level, he
+        # should call cascaded endpoint directly!
+        if acl.get_limited_to_project(pecan.request.headers) is not None:
+            raise wsme.exc.ClientSideError("cascading level post sample is admin required", 401)
+
+        # If admin user wants to get datas, he should call cascaded level
+        # directly, so normal user will only get tenant resource, which
+        # means some resources like host which has no user_id, project_id
+        # will not be processed by this method.
+
+        # Support list is for bulk create scenarios like bulk create instances
+        for sample in samples:
+            if not sample.user_id:
+                raise wsme.exc.ClientSideError("user_id should be set")
+            if not sample.project_id:
+                raise wsme.exc.ClientSideError("project_id should be set")
+            if not sample.resource_id:
+                raise wsme.exc.ClientSideError("resource_id should be set")
+
+            metadata = sample.resource_metadata or {}
+            if 'region' not in metadata:
+                raise wsme.exc.ClientSideError("missing metadata field 'region'")
+            if 'cascaded_resource_id' not in metadata:
+                raise wsme.exc.ClientSideError("missing metadata field 'cascaded_resource_id'")
+            if 'type' not in metadata:
+                raise wsme.exc.ClientSideError("missing metadata field 'type'")
+
+            global type2meters
+            resource = {
+                "_id": sample.resource_id,
+                "user_id": sample.user_id,
+                "project_id": sample.project_id,
+                "source": sample.source or pecan.request.cfg.sample_source,
+                "metadata": sample.resource_metadata,
+                #TODO(zqfan): set to default meters according to metadata.type
+                "meter": type2meters.get(metadata['type'], []),
+            }
+            pecan.request.storage_conn.record_resource(resource)
+
+        # The return result has no sense, just to suit the interface
+        return samples
 
     @wsme_pecan.wsexpose([Statistics], [Query], [unicode], int, [Aggregate])
     def statistics(self, q=None, groupby=None, period=None, aggregate=None):
@@ -1651,7 +1704,6 @@ class ResourcesController(rest.RestController):
 
     @wsme_pecan.wsexpose(Resource, body=Resource, status_code=201)
     def post(self, resource):
-        #TODO(zqfan): only admin can call this method
         if acl.get_limited_to_project(pecan.request.headers) is not None:
             raise wsme.exc.ClientSideError("admin required", 401)
         if not resource.resource_id:
