@@ -1,5 +1,5 @@
 {
-    "instance": [
+    "nova.instance": [
         {
             "counter_name": "instance",
             "counter_unit": "instance",
@@ -158,6 +158,67 @@
         {
             "counter_name": "network.outgoing.packets.rate",
             "counter_unit": "packet/s",
+            "counter_type": "gauge"
+        }
+    ],
+    "glance.image": [
+        {
+            "counter_name": "image",
+            "counter_unit": "image",
+            "counter_type": "gauge"
+        },
+        {
+            "counter_name": "image.size",
+            "counter_unit": "B",
+            "counter_type": "gauge"
+        },
+        {
+            "counter_name": "image.update",
+            "counter_unit": "image",
+            "counter_type": "delta"
+        },
+        {
+            "counter_name": "image.upload",
+            "counter_unit": "image",
+            "counter_type": "delta"
+        },
+        {
+            "counter_name": "image.delete",
+            "counter_unit": "image",
+            "counter_type": "delta"
+        },
+        {
+            "counter_name": "image.download",
+            "counter_unit": "B",
+            "counter_type": "delta"
+        },
+        {
+            "counter_name": "image.serve",
+            "counter_unit": "B",
+            "counter_type": "delta"
+        }
+    ],
+    "cinder.volume": [
+        {
+            "counter_name": "volume",
+            "counter_unit": "volume",
+            "counter_type": "gauge"
+        },
+        {
+            "counter_name": "volume.size",
+            "counter_unit": "GB",
+            "counter_type": "gauge"
+        }
+    ],
+    "cinder.snapshot": [
+        {
+            "counter_name": "snapshot",
+            "counter_unit": "snapshot",
+            "counter_type": "gauge"
+        },
+        {
+            "counter_name": "snapshot.size",
+            "counter_unit": "B",
             "counter_type": "gauge"
         }
     ]

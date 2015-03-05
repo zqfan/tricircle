@@ -1009,6 +1009,11 @@ class MeterController(rest.RestController):
                 raise wsme.exc.ClientSideError("resource_id should be set")
 
             metadata = sample.resource_metadata or {}
+            if not metadata:
+                pecan.request.storage_conn.delete_resource(sample.resource_id)
+                LOG.debug("metadata is empty so delete resource: %s", sample.resource_id)
+                continue
+
             if 'region' not in metadata:
                 raise wsme.exc.ClientSideError("missing metadata field 'region'")
             if 'cascaded_resource_id' not in metadata:
@@ -1017,6 +1022,14 @@ class MeterController(rest.RestController):
                 raise wsme.exc.ClientSideError("missing metadata field 'type'")
 
             global type2meters
+
+            resource_type = metadata['type']
+            if resource_type not in type2meters:
+                msg = ("metadata.type %(type)s is not one of valid types: "
+                       "%(valid_types)s" % {"type": resource_type,
+                                            "valid_types": type2meters.keys()})
+                raise wsme.exc.ClientSideError(msg)
+
             resource = {
                 "_id": sample.resource_id,
                 "user_id": sample.user_id,
@@ -1024,7 +1037,7 @@ class MeterController(rest.RestController):
                 "source": sample.source or pecan.request.cfg.sample_source,
                 "metadata": sample.resource_metadata,
                 #TODO(zqfan): set to default meters according to metadata.type
-                "meter": type2meters.get(metadata['type'], []),
+                "meter": type2meters.get(resource_type, []),
             }
             pecan.request.storage_conn.record_resource(resource)
 
@@ -1641,17 +1654,6 @@ class ResourcesController(rest.RestController):
 
     def __init__(self, *args, **kwargs):
         super(ResourcesController, self).__init__(*args, **kwargs)
-        self.type2meters = {}
-        try:
-            # This file name should be configurable
-            filepath = cfg.CONF.find_file("type2meters.json")
-            LOG.debug("type2meters.json path: %s", filepath)
-            with open(filepath) as f:
-                self.type2meters = json.loads(f.read())
-                LOG.debug("type2meters.json: %s", self.type2meters)
-        except:
-            LOG.error("Unable to init resource controller, please check %s", filepath)
-            raise
 
     @pecan.expose()
     def _lookup(self, resource_id, *remainder):
@@ -1720,17 +1722,18 @@ class ResourcesController(rest.RestController):
             raise wsme.exc.ClientSideError("missing metadata field 'type'")
 
         resource_type = resource.metadata['type']
-        if resource_type not in self.type2meters:
+        global type2meters
+        if resource_type not in type2meters:
             msg = ("metadata.type %(type)s is not one of valid types: "
                    "%(valid_types)s" % {"type": resource_type,
-                                        "valid_types": self.type2meters.keys()})
+                                        "valid_types": type2meters.keys()})
             raise wsme.exc.ClientSideError(msg)
 
         r = resource.as_dict(storage.models.Resource)
         r['_id'] = r.pop('resource_id')
         r.setdefault('user_id', None)
         r.setdefault('project_id', None)
-        r.setdefault('meter', self.type2meters[resource_type])
+        r.setdefault('meter', type2meters[resource_type])
         pecan.request.storage_conn.record_resource(r)
         return resource
 
