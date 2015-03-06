@@ -65,11 +65,61 @@ Details
 Interavtive
 -----------
 
-Other service should call Ceilometer API to post samples when resource created and deleted. There are some required fields, here is the minimum case:
+Other service should call Ceilometer API to post samples when resource created and deleted.
+
+To avoid couple with Ceilometer, you can use a configure option to indicates whether Ceilometer is enabled. For example::
+
+    def __init__(self, xxx):
+        ...
+        self.cm_client = None
+        if cfg.CONF.ceilometer_enabled:
+            self.cm_client = ceilometerclient.client.get_client(2, xxx)
+
+    def vm_create(self, xxx):
+        ...
+        if self.cm_client:
+            sample = {
+                "counter_name": "foo", # can be anything
+                "counter_type": "gauge", # hard-coded, can be one of gauge, delta, cumulative
+                "counter_unit": "foo", # can be anything
+                "couter_volume": 0, # can be any float value
+                "user_id": vm.user_id, # should be the created vm's user_id
+                "project_id": vm.project_id, # should be the created vm's project_id
+                "resource_id": vm.uuid, # should be the created vm's uuid
+                "resource_metadata": {
+                    "region": "regionOne", # which region this vm belongs to
+                    "cascaded_resource_id": "bar", # the uuid of this vm in cascaded level
+                    "type": "nova.instance", # the type of this resource, see all types in etc/ceilometer/type2meters.json
+                }
+            self.cm_client.samples.create(**sample)
+        ...
+
+    def vm_delete(self, xxx):
+        ...
+        if self.cm_client:
+            sample = {
+                "counter_name": "foo", # can be anything
+                "counter_type": "gauge", # hard-coded, can be one of gauge, delta, cumulative
+                "counter_unit": "foo", # can be anything
+                "couter_volume": 0, # can be any float value
+                "user_id": vm.user_id, # should be the created vm's user_id
+                "project_id": vm.project_id, # should be the created vm's project_id
+                "resource_id": vm.uuid, # should be the created vm's uuid
+                "resource_metadata": {} # empty resource metadata indicates resource delete operation
+            self.cm_client.samples.create(**sample)
+        ...
+
+The above example shows all the required fields, when resource_metadata is empty, it means this resource is deleted. Here is the equal curl presentation:
+
+curl -i -X POST 'http://10.67.148.221:8777/v2/meters/instance' -H "X-Auth-Token: $(keystone token-get | awk 'NR==5{print $4}')" -H 'Content-Type: application/json' -d '[{"counter_name": "instance", "counter_type": "gauge", "counter_unit": "instance", "counter_volume": 1.0, "user_id": "d22a404f68c4485bb9193f7a1e17c74c", "resource_id": "df422bf5-10f3-4ecb-a9e3-f1dea761052a", "project_id": "db1921917d8543b1ba7ff9b1f1df6081", "resource_metadata": {"region": "regionOne", "cascaded_resource_id": "ff016a27-2126-4ac9-8c31-b4bd734e4892", "type": "nova.instance"}}]'
+
+curl -i -X POST 'http://10.67.148.221:8777/v2/meters/instance' -H "X-Auth-Token: $(keystone token-get | awk 'NR==5{print $4}')" -H 'Content-Type: application/json' -d '[{"counter_name": "instance", "counter_type": "gauge", "counter_unit": "instance", "counter_volume": 1.0, "user_id": "d22a404f68c4485bb9193f7a1e17c74c", "resource_id": "df422bf5-10f3-4ecb-a9e3-f1dea761052a", "project_id": "db1921917d8543b1ba7ff9b1f1df6081", "resource_metadata": {}}]'
+
+here is another way which directly post or delete a resource, this API has no CLI support and may be removed:
 
 curl -i -X POST http://10.67.148.221:8777/v2/resources -H "X-Auth-Token: $(keystone token-get | awk 'NR==5{print $4}')" -H 'Content-Type: application/json' -d '{"source": "nova", "resource_id": "123", "meter": [{"counter_name": "image", "counter_unit": "image", "counter_type": "gauge"}], "metadata": {"region": "regionOne", "cascaded_resource_id": "ff016a27-2126-4ac9-8c31-b4bd734e4892", "type": "nova.instance"}}'
 
-
+curl -i -X DELETE http://10.67.148.221:8777/v2/resources/123 -H "X-Auth-Token: $(keystone token-get | awk 'NR==5{print $4}')" -H 'Content-Type: application/json'
 
 Progress
 ========
