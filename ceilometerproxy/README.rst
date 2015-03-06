@@ -82,7 +82,7 @@ To avoid couple with Ceilometer, you can use a configure option to indicates whe
                 "counter_name": "foo", # can be anything
                 "counter_type": "gauge", # hard-coded, can be one of gauge, delta, cumulative
                 "counter_unit": "foo", # can be anything
-                "couter_volume": 0, # can be any float value
+                "counter_volume": 0, # can be any float value
                 "user_id": vm.user_id, # should be the created vm's user_id
                 "project_id": vm.project_id, # should be the created vm's project_id
                 "resource_id": vm.uuid, # should be the created vm's uuid
@@ -101,7 +101,7 @@ To avoid couple with Ceilometer, you can use a configure option to indicates whe
                 "counter_name": "foo", # can be anything
                 "counter_type": "gauge", # hard-coded, can be one of gauge, delta, cumulative
                 "counter_unit": "foo", # can be anything
-                "couter_volume": 0, # can be any float value
+                "counter_volume": 0, # can be any float value
                 "user_id": vm.user_id, # should be the created vm's user_id
                 "project_id": vm.project_id, # should be the created vm's project_id
                 "resource_id": vm.uuid, # should be the created vm's uuid

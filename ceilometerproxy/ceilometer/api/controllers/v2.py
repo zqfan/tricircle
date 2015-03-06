@@ -986,6 +986,12 @@ class MeterController(rest.RestController):
     def post(self, samples):
         """Post a list of new Samples to Telemetry.
 
+        These samples will not stored, but extract resource information from
+        them and stored in resource table.
+
+        If sample's resource_metadata field is empty, then it will be treated
+        as a resource delete operation.
+
         :param samples: a list of samples within the request body.
         """
         # This method is used only by other service in cascading level.
@@ -1011,7 +1017,8 @@ class MeterController(rest.RestController):
             metadata = sample.resource_metadata or {}
             if not metadata:
                 pecan.request.storage_conn.delete_resource(sample.resource_id)
-                LOG.debug("metadata is empty so delete resource: %s", sample.resource_id)
+                LOG.debug("metadata is empty so delete resource: %s",
+                          sample.resource_id)
                 continue
 
             if 'region' not in metadata:
@@ -1036,7 +1043,6 @@ class MeterController(rest.RestController):
                 "project_id": sample.project_id,
                 "source": sample.source or pecan.request.cfg.sample_source,
                 "metadata": sample.resource_metadata,
-                #TODO(zqfan): set to default meters according to metadata.type
                 "meter": type2meters.get(resource_type, []),
             }
             pecan.request.storage_conn.record_resource(resource)
@@ -1133,16 +1139,20 @@ class MeterController(rest.RestController):
         queries = []
         for query in q:
             queries.append(query.as_dict())
-        statistics = _cmclient.statistics.list(self.meter_name, q=queries, period=period, groupby=groupby, aggregates=aggregate)
+        statistics = _cmclient.statistics.list(self.meter_name,
+                                               q=queries,
+                                               period=period,
+                                               groupby=groupby,
+                                               aggregates=aggregate)
 
         ret = []
-        for statistic in statistics:
-            statistic = statistic.to_dict()
-            statistic['duration_start'] = timeutils.parse_isotime(statistic['duration_start'])
-            statistic['duration_end'] = timeutils.parse_isotime(statistic['duration_end'])
-            statistic['period_start'] = timeutils.parse_isotime(statistic['period_start'])
-            statistic['period_end'] = timeutils.parse_isotime(statistic['period_end'])
-            ret.append(Statistics(**statistic))
+        for s in statistics:
+            s = s.to_dict()
+            s['duration_start'] = timeutils.parse_isotime(s['duration_start'])
+            s['duration_end'] = timeutils.parse_isotime(s['duration_end'])
+            s['period_start'] = timeutils.parse_isotime(s['period_start'])
+            s['period_end'] = timeutils.parse_isotime(s['period_end'])
+            ret.append(Statistics(**s))
         return ret
 
 
@@ -1206,7 +1216,7 @@ class MetersController(rest.RestController):
 
         :param q: Filter rules for the meters to be returned.
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class Sample(_Base):
@@ -1291,7 +1301,7 @@ class SamplesController(rest.RestController):
         :param q: Filter rules for the samples to be returned.
         :param limit: Maximum number of samples to be returned.
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
     @wsme_pecan.wsexpose(Sample, wtypes.text)
     def get_one(self, sample_id):
@@ -1299,7 +1309,7 @@ class SamplesController(rest.RestController):
 
         :param sample_id: the id of the sample
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class ComplexQuery(_Base):
@@ -2203,6 +2213,7 @@ class AlarmController(rest.RestController):
 
         _cmclient = self._get_cascaded_cm_client(alarm)
 
+        #FIXME(zqfan): should be cascaded_resource_id?
         resource_query.value = resource_id
         kwargs = data.as_dict(alarm_models.Alarm)
         kwargs['threshold_rule'] = kwargs.pop('rule')
@@ -2332,7 +2343,7 @@ class AlarmsController(rest.RestController):
         if not resource:
             raise wsme.exc.ClientSideError("resource not found", 404)
         if not resource.metadata:
-            pecan.request.storage_conn.delete_resource(resource.resource_id)
+            pecan.request.storage_conn.delete_resource(resource_id)
             raise wsme.exc.ClientSideError("resource not found", 404)
 
         cascaded_id = resource.metadata.get('cascaded_resource_id')
@@ -2596,7 +2607,7 @@ class TraitsController(rest.RestController):
         :param event_type: Event type to filter traits by
         :param trait_name: Trait to return values for
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
     @requires_admin
     @wsme_pecan.wsexpose([TraitDescription], wtypes.text)
@@ -2605,7 +2616,7 @@ class TraitsController(rest.RestController):
 
         :param event_type: Event type to filter traits by
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class EventTypesController(rest.RestController):
@@ -2621,7 +2632,7 @@ class EventTypesController(rest.RestController):
     @wsme_pecan.wsexpose([unicode])
     def get_all(self):
         """Get all event types."""
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class EventsController(rest.RestController):
@@ -2634,7 +2645,7 @@ class EventsController(rest.RestController):
 
         :param q: Filter arguments for which Events to return
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
     @requires_admin
     @wsme_pecan.wsexpose(Event, wtypes.text)
@@ -2643,7 +2654,7 @@ class EventsController(rest.RestController):
 
         :param message_id: Message ID of the Event to be returned
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class QuerySamplesController(rest.RestController):
@@ -2655,7 +2666,7 @@ class QuerySamplesController(rest.RestController):
 
         :param body: Query rules for the samples to be returned.
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class QueryAlarmHistoryController(rest.RestController):
@@ -2666,7 +2677,7 @@ class QueryAlarmHistoryController(rest.RestController):
 
         :param body: Query rules for the alarm history to be returned.
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class QueryAlarmsController(rest.RestController):
@@ -2679,7 +2690,7 @@ class QueryAlarmsController(rest.RestController):
 
         :param body: Query rules for the alarms to be returned.
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class QueryController(rest.RestController):
@@ -2757,7 +2768,7 @@ class CapabilitiesController(rest.RestController):
 
         Capabilities supported by the currently configured storage driver.
         """
-        raise ceilometer.NotImplementedError()
+        raise NotImplementedError()
 
 
 class V2Controller(object):
