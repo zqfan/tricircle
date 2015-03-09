@@ -2213,8 +2213,7 @@ class AlarmController(rest.RestController):
 
         _cmclient = self._get_cascaded_cm_client(alarm)
 
-        #FIXME(zqfan): should be cascaded_resource_id?
-        resource_query.value = resource_id
+        resource_query.value = cascaded_resource_id
         kwargs = data.as_dict(alarm_models.Alarm)
         kwargs['threshold_rule'] = kwargs.pop('rule')
         cascaded_alarm = _cmclient.alarms.update(cascaded_alarm_id, **kwargs)
@@ -2267,6 +2266,7 @@ class AlarmController(rest.RestController):
             LOG.error("Failed to delete cascaded alarm because %s", e)
         else:
             self.conn.delete_alarm(alarm.alarm_id)
+            LOG.debug("delete alarm %s", alarm.alarm_id)
 
     # TODO(eglynn): add pagination marker to signature once overall
     #               API support for pagination is finalized

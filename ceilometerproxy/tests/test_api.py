@@ -1,11 +1,14 @@
 #! /usr/bin/env python
 
+import json
+import unittest
+
 from ceilometerclient import client as cm_client
 from keystoneclient.v2_0 import client as ks_client
 from oslo.config import cfg
-import unittest
 
 from ceilometer import service
+from ceilometer import storage
 
 cfg.CONF([], project='ceilometer')
 
@@ -33,26 +36,113 @@ CASCADED_CM_CLIENT = cm_client.get_client(
     ceilometer_url=CASCADED_CM_ENDPOINT)
 
 class APITest(unittest.TestCase):
-    SAMPLE = {
-        "counter_name": "foo",
-        "counter_type": "gauge",
-        "counter_unit": "foo",
-        "counter_volume": 0,
-        "user_id": "123",
-        "project_id": "456",
-        "resource_id": "789",
-        "resource_metadata": {
-            "region": "regionOne",
-            "cascaded_resource_id": "abc",
-            "type": "nova.instance"
-        }
-    }
 
-    def test_post_sample_create_resource(self):
-        CASCADING_CM_CLIENT.samples.create(**self.SAMPLE)
+    def setUp(self):
+        self.sample = {
+            "counter_name": "foo",
+            "counter_type": "gauge",
+            "counter_unit": "foo",
+            "counter_volume": 0,
+            "user_id": "789",
+            "project_id": "456",
+            "resource_id": "123",
+            "resource_metadata": {
+                "region": "regionOne",
+                "cascaded_resource_id": "abc",
+                "type": "nova.instance"
+            }
+        }
+        self.alarm_conn = storage.get_connection_from_config(
+            cfg.CONF, purpose='alarm')
+
+    def test_post_sample_create_delete_resource(self):
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        resources = CASCADING_CM_CLIENT.resources.list()
+        self.assertEqual(1, len(resources))
+        self.assertEqual("123", resources[0].resource_id)
+        # meter links is enabled, so it should be several links
+        self.assertTrue(len(resources[0].links) > 1)
+
+        # remove it
+        self.sample['resource_metadata'] = {}
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        resources = CASCADING_CM_CLIENT.resources.list()
+        self.assertEqual(0, len(resources))
+
+    def test_get_samples_and_statistics_from_cascaded(self):
+        samples = CASCADED_CM_CLIENT.samples.list(meter_name="instance",
+                                                  limit=1)
+        self.assertEqual(1, len(samples))
+        resource_id = samples[0].resource_id
+        self.sample['resource_metadata']['cascaded_resource_id'] = resource_id
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+
+        resource_query = {
+            "field": "resource",
+            "value": "123",
+        }
+        samples = CASCADING_CM_CLIENT.samples.list(meter_name="instance",
+                                                   q=[resource_query],
+                                                   limit=1)
+        self.assertEqual(1, len(samples))
+        self.assertEqual("123", samples[0].resource_id)
+        statistics = CASCADING_CM_CLIENT.statistics.list(meter_name="instance",
+                                                         q=[resource_query])
+        self.assertEqual(1, len(statistics))
+
+        # remove it
+        self.sample['resource_metadata'] = {}
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        resources = CASCADING_CM_CLIENT.resources.list()
+        self.assertEqual(0, len(resources))
 
     def test_alarm(self):
-        pass
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+
+        alarm = {
+            "name": "alarm-test",
+            "type": "threshold",
+            "threshold_rule": {
+                "threshold": 1,
+                "meter_name": "instance",
+                "query": [{
+                    "field": "resource",
+                    "value": "123",
+                }]
+            }
+        }
+        alarm = CASCADING_CM_CLIENT.alarms.create(**alarm)
+        alarms = CASCADING_CM_CLIENT.alarms.list()
+        self.assertEqual(1, len(alarms))
+        self.assertEqual(alarm, alarms[0])
+        self.assertEqual("123", alarm.threshold_rule['query'][0]['value'])
+
+        # check cascaded node's alarm has internal resource id query
+        alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
+        cascaded_alarm_id = json.loads(alarms[0].description)['cascaded_alarm_id']
+        cascaded_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
+        self.assertEqual("abc", cascaded_alarm.threshold_rule['query'][0]['value'])
+
+        # remove the alarm
+        CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
+
+        # remove the resource
+        self.sample['resource_metadata'] = {}
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+
+        # check cascaded node has delete corresponding alarm
+        query = {
+            "field": "alarm_id",
+            "value": cascaded_alarm_id,
+        }
+        cascaded_alarms = CASCADED_CM_CLIENT.alarms.list(q=[query])
+        self.assertEqual(0, len(cascaded_alarms))
 
 if __name__ == '__main__':
-    unittest.main()
+    print "=" * 79
+    print "Ensure you have at least one ACTIVE vm in cascaded node:",
+    print CASCADED_CM_ENDPOINT
+    print "If there is a 500 error, check if resources have not been cleaned"
+    print "=" * 79
+    suite = unittest.TestLoader().loadTestsFromTestCase(APITest)
+    unittest.TextTestRunner(verbosity=2).run(suite)
