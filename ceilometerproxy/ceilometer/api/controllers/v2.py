@@ -86,12 +86,94 @@ type2meters = {}
 try:
     # consider make this file name should be configurable?
     filepath = cfg.CONF.find_file("type2meters.json")
-    LOG.debug("type2meters.json path: %s", filepath)
     with open(filepath) as f:
         type2meters = json.loads(f.read())
         LOG.debug("type2meters.json: %s", type2meters)
 except:
-    LOG.error("Unable to init resource controller, please check %s", filepath)
+    LOG.exception("Unable to init type2meters map, please check %s", filepath)
+
+
+_az2region = {}
+try:
+    filepath = cfg.CONF.find_file("az2region.json")
+    with open(filepath) as f:
+        _az2region = json.loads(f.read())
+        LOG.debug("az2region.json: %s", _az2region)
+except:
+    LOG.exception("Unable to init az2region map, please check %s", filepath)
+
+
+def _get_region_by_az(az):
+    try:
+        return _az2region[az]
+    except:
+        raise ClientSideError("Invalid az name, valid set are: %s", _az2region.keys())
+
+_ks_client = None
+def _get_ks_client():
+    global _ks_client
+    if not _ks_client:
+        _ks_client = ksclient.Client(
+            username=cfg.CONF.service_credentials.os_username,
+            password=cfg.CONF.service_credentials.os_password,
+            tenant_id=cfg.CONF.service_credentials.os_tenant_id,
+            tenant_name=cfg.CONF.service_credentials.os_tenant_name,
+            cacert=cfg.CONF.service_credentials.os_cacert,
+            auth_url=cfg.CONF.service_credentials.os_auth_url,
+            region_name=cfg.CONF.service_credentials.os_region_name,
+            insecure=cfg.CONF.service_credentials.insecure,)
+    return _ks_client
+
+
+_region2endpoint = {}
+def _get_cm_endpoint_by_region(region):
+    if region in _region2endpoint:
+        return _region2endpoint[region]
+
+    ks_client = _get_ks_client()
+
+    ceilometer_service_id = []
+    for service in ks_client.services.list():
+        if service.type == 'metering' and service.enabled is True:
+            ceilometer_service_id.append(service.id)
+
+    if not ceilometer_service_id:
+        raise Exception("No metering service found")
+    if len(ceilometer_service_id) > 1:
+        raise Exception("Multiple metering service found")
+    ceilometer_service_id = ceilometer_service_id[0]
+
+    ceilometer_endpoints = []
+    for endpoint in ks_client.endpoints.list():
+        if (endpoint.region == region
+            and endpoint.service_id == ceilometer_service_id
+            and endpoint.enabled is True):
+            ceilometer_endpoints.append(endpoint.publicurl)
+
+    if not ceilometer_endpoints:
+        raise Exception("Cascaded ceilometer for %s not found" % region)
+    if len(ceilometer_endpoints) > 1:
+        raise Exception(("Region %s exists multiple "
+                         "cascaded ceilometer: %s") % (
+                        ceilometer_endpoints, region))
+
+    _region2endpoint[region] = ceilometer_endpoints[0]
+    return ceilometer_endpoints[0]
+
+
+_endpoint2client = {}
+def _get_cm_client_by_endpoint(endpoint):
+    if endpoint in _endpoint2client:
+        return _endpoint2client[endpoint]
+
+    kwargs = {
+        "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
+        "ceilometer_url": endpoint,
+    }
+    _cmclient = cmclient.get_client(2, **kwargs)
+
+    _endpoint2client[endpoint] = _cmclient
+    return _cmclient
 
 
 class ClientSideError(wsme.exc.ClientSideError):
@@ -2157,7 +2239,7 @@ class AlarmController(rest.RestController):
         return _cmclient.alarms.get(cascaded_alarm_id)
 
     def _merge_alarm_attributes(self, cascading, cascaded):
-        resource_id = json.loads(cascading.description)['query.resource_id']
+        resource_id = json.loads(cascading.description).get('query.resource_id')
         for query in cascaded.rule['query']:
             if query['field'] in ('resource_id', 'resource'):
                 query['value'] = resource_id
@@ -2208,7 +2290,7 @@ class AlarmController(rest.RestController):
                                   "delete it then create a new one")
 
         desc = json.loads(alarm.description)
-        cascaded_alarm_id = desc['cascaded_alarm_id']
+        cascaded_alarm_id = desc['cascadekd_alarm_id']
         cascaded_resource_id = desc['query.resource_id']
 
         _cmclient = self._get_cascaded_cm_client(alarm)
@@ -2328,14 +2410,56 @@ class AlarmsController(rest.RestController):
         if data.type == 'group':
             raise ClientSideError("NotImplementedError for group type")
 
-        resource_query = None
+        az = None
         for query in data.threshold_rule.query:
             if query.field in ('resource', 'resource_id'):
-                resource_query = query
-                break
-        else:
-            msg = "NotImplementedError for non resource_id query"
-            raise ClientSideError(msg)
+                return self._create_single_resource_based_alarm(data, query)
+            if query.field == 'metadata.OS-EXT-AZ.availability_zone':
+                az = query.value
+
+        if az:
+            return self._create_az_based_alarm(data, az)
+
+        msg = ("Only support single resource based alarm and heat auto "
+               "scaling alarm, you need to specify resource_id or "
+               "OS-EXT-AZ.availability_zone in query")
+        raise ClientSideError(msg)
+
+    def _create_az_based_alarm(self, data, az):
+        region = _get_region_by_az(az)
+        cascaded_ceilometer_url = _get_cm_endpoint_by_region(region)
+        _cmclient = _get_cm_client_by_endpoint(cascaded_ceilometer_url)
+
+        kwargs = data.as_dict(alarm_models.Alarm)
+        kwargs['threshold_rule'] = kwargs.pop('rule')
+        alarm = _cmclient.alarms.create(**kwargs)
+        LOG.info("Create cascaded alarm is : %s" % alarm.to_dict())
+
+        kwargs = alarm.to_dict()
+        kwargs['state_timestamp'] = timeutils.parse_strtime(
+            kwargs['state_timestamp'])
+        kwargs['timestamp'] = timeutils.parse_strtime(kwargs['timestamp'])
+        kwargs['rule'] = kwargs.pop('threshold_rule')
+        cascaded_alarm_desc = kwargs['description']
+        kwargs['description'] = json.dumps({
+            "cascaded_alarm_id": kwargs['alarm_id'],
+            "region": region,
+            "cascaded_ceilometer_url": cascaded_ceilometer_url,
+            "description": cascaded_alarm_desc,})
+        kwargs['alarm_id'] = str(uuid.uuid4())
+
+        try:
+            alarm_internal = alarm_models.Alarm(**kwargs)
+        except Exception:
+            LOG.exception(_("Error while posting alarm: %s") % kwargs)
+            raise ClientSideError(_("Alarm incorrect"))
+
+        pecan.request.alarm_storage_conn.create_alarm(alarm_internal)
+
+        kwargs['description'] = cascaded_alarm_desc
+        return Alarm(**kwargs)
+
+    def _create_single_resource_based_alarm(self, data, resource_query):
 
         #TODO(zqfan): check resource belong to this project and user
         resource_id = resource_query.value

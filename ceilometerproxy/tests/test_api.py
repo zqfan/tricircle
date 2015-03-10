@@ -3,6 +3,7 @@
 import json
 import unittest
 
+import ceilometerclient
 from ceilometerclient import client as cm_client
 from keystoneclient.v2_0 import client as ks_client
 from oslo.config import cfg
@@ -96,7 +97,7 @@ class APITest(unittest.TestCase):
         resources = CASCADING_CM_CLIENT.resources.list()
         self.assertEqual(0, len(resources))
 
-    def test_alarm(self):
+    def test_single_resource_based_alarm(self):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
 
         alarm = {
@@ -137,6 +138,70 @@ class APITest(unittest.TestCase):
         }
         cascaded_alarms = CASCADED_CM_CLIENT.alarms.list(q=[query])
         self.assertEqual(0, len(cascaded_alarms))
+
+    def test_resource_based_alarm_put(self):
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+
+        json = {
+            "name": "alarm-test",
+            "type": "threshold",
+            "threshold_rule": {
+                "threshold": 1,
+                "meter_name": "instance",
+                "query": [{
+                    "field": "resource",
+                    "value": "123",
+                }]
+            }
+        }
+        alarm = CASCADING_CM_CLIENT.alarms.create(**json)
+
+        # cannot change resource
+        json['threshold_rule']['query'][0]['value'] = "456"
+        self.assertRaises(Exception,
+                          CASCADING_CM_CLIENT.alarms.update,
+                          alarm.alarm_id, **json)
+        self.assertEqual(alarm, CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id))
+
+        # remove the alarm
+        CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
+
+        # remove the resource
+        self.sample['resource_metadata'] = {}
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+
+    def test_az_based_alarm(self):
+        alarm = {
+            "name": "alarm-test",
+            "type": "threshold",
+            "threshold_rule": {
+                "threshold": 1,
+                "meter_name": "instance",
+                "query": [{
+                    "field": "metadata.OS-EXT-AZ.availability_zone",
+                    "value": "nova",
+                }]
+            }
+        }
+        alarm = CASCADING_CM_CLIENT.alarms.create(**alarm)
+        alarms = CASCADING_CM_CLIENT.alarms.list()
+        self.assertEqual(1, len(alarms))
+        self.assertEqual(alarm, alarms[0])
+
+        alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
+        cascaded_alarm_id = json.loads(alarms[0].description)['cascaded_alarm_id']
+
+        # remove the alarm
+        CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
+
+        # check cascaded node has delete corresponding alarm
+        query = {
+            "field": "alarm_id",
+            "value": cascaded_alarm_id,
+        }
+        cascaded_alarms = CASCADED_CM_CLIENT.alarms.list(q=[query])
+        self.assertEqual(0, len(cascaded_alarms))
+
 
 if __name__ == '__main__':
     print "=" * 79
