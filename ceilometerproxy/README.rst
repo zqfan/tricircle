@@ -42,14 +42,22 @@ We provide two ways to install the Cinder-Proxy code. In this section, we will g
 Functionalities
 ===============
 
-1. Alarm CRUD. (List of alarm will not be supported yet. This aims to implement Heat autoscaling feature)
+Alarm
+-----
 
+Heat auto scaling is not supported yet, Heat will create alarm which care about instances in that stack, which means from cascading level ceilometer doesn't know which region this alarm should be proxied to.
 
-Details
--------
+Currently, single resource based alarm CRUD is supported, this provide a way to monitor an instance's status for normal users. List of alarm is supported too but not consistent with cascaded level.
 
-* API will not support admin user access in cascading level, and capabilities are limited for normal users.
-* Metering API only support single resource based for normal user
+Metric
+------
+
+Metering API only support single resource based for normal user, that means, API query should have resource_id filter. Admin user should access cascading level directly, if he want to get rid of such limit.
+
+Multiple tenant
+---------------
+
+* API will not support admin user access metering data in cascading level, and capabilities are limited for normal users.
 
 
 Implementation
