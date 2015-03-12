@@ -161,19 +161,12 @@ def _get_cm_endpoint_by_region(region):
     return ceilometer_endpoints[0]
 
 
-_endpoint2client = {}
 def _get_cm_client_by_endpoint(endpoint):
-    if endpoint in _endpoint2client:
-        return _endpoint2client[endpoint]
-
     kwargs = {
         "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
         "ceilometer_url": endpoint,
     }
-    _cmclient = cmclient.get_client(2, **kwargs)
-
-    _endpoint2client[endpoint] = _cmclient
-    return _cmclient
+    return cmclient.get_client(2, **kwargs)
 
 
 class ClientSideError(wsme.exc.ClientSideError):
@@ -2239,11 +2232,7 @@ class AlarmController(rest.RestController):
         return _cmclient.alarms.get(cascaded_alarm_id)
 
     def _merge_alarm_attributes(self, cascading, cascaded):
-        resource_id = json.loads(cascading.description).get('query.resource_id')
-        for query in cascaded.rule['query']:
-            if query['field'] in ('resource_id', 'resource'):
-                query['value'] = resource_id
-
+        cascaded.rule['query'] = cascading.rule['query']
         kwargs = cascaded.to_dict()
         kwargs['state_timestamp'] = timeutils.parse_strtime(
             kwargs['state_timestamp'])
@@ -2265,8 +2254,6 @@ class AlarmController(rest.RestController):
 
         :param data: an alarm within the request body.
         """
-        # Ensure alarm exists
-        alarm = self._alarm()
 
         if data.type != "threshold":
             raise ClientSideError("NotImplementedError for %s type", data.type)
@@ -2275,19 +2262,23 @@ class AlarmController(rest.RestController):
         for query in data.threshold_rule.query:
             if query.field in ('resource', 'resource_id'):
                 resource_query = query
-                break
-        else:
-            msg = "NotImplementedError for non resource_id query"
-            raise ClientSideError(msg)
+                return self._put_single_resource_based_alarm(data, query)
+
+        msg = ("Only support single resource based alarm and heat auto "
+               "scaling alarm, you need to specify resource_id or "
+               "OS-EXT-AZ.availability_zone in query")
+        raise ClientSideError(msg)
+
+    def _put_single_resource_based_alarm(self, data, resource_query):
+        # Ensure alarm exists
+        alarm = self._alarm()
 
         resource_id = resource_query.value
         for query in alarm.rule['query']:
             if (query['field'] in ('resource_id', 'resource')
-                and query['value'] == resource_id):
-                break
-        else:
-            raise ClientSideError("update resource_id is not suppoted yet, "
-                                  "delete it then create a new one")
+                and query['value'] != resource_id):
+                raise ClientSideError("update resource_id is not suppoted yet, "
+                                      "delete it then create a new one")
 
         desc = json.loads(alarm.description)
         cascaded_alarm_id = desc['cascadekd_alarm_id']
@@ -2538,7 +2529,7 @@ class AlarmsController(rest.RestController):
         kwargs['description'] = json.dumps({
             "cascaded_alarm_id": kwargs['alarm_id'],
             "region": region,
-            "query.resource_id": resource_id,
+            "cascaded.query.resource_id": cascaded_id,
             "cascaded_ceilometer_url": cascaded_ceilometer_url,
             "description": cascaded_alarm_desc,})
         kwargs['alarm_id'] = str(uuid.uuid4())
