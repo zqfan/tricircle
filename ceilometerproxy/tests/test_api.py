@@ -1,14 +1,15 @@
 #! /usr/bin/env python
 
+from __future__ import print_function
 import json
 import unittest
 
-import ceilometerclient
 from ceilometerclient import client as cm_client
+from ceilometerclient.openstack.common.apiclient import exceptions
 from keystoneclient.v2_0 import client as ks_client
 from oslo.config import cfg
 
-from ceilometer import service
+from ceilometer import service  # noqa
 from ceilometer import storage
 
 cfg.CONF([], project='ceilometer')
@@ -35,6 +36,7 @@ CASCADED_CM_CLIENT = cm_client.get_client(
     version=2,
     os_auth_token=TOKEN,
     ceilometer_url=CASCADED_CM_ENDPOINT)
+
 
 class APITest(unittest.TestCase):
 
@@ -120,9 +122,11 @@ class APITest(unittest.TestCase):
 
         # check cascaded node's alarm has internal resource id query
         alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
-        cascaded_alarm_id = json.loads(alarms[0].description)['cascaded_alarm_id']
+        cascaded_alarm_id = (json.loads(alarms[0].description)
+                             .get('cascaded_alarm_id'))
         cascaded_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
-        self.assertEqual("abc", cascaded_alarm.threshold_rule['query'][0]['value'])
+        self.assertEqual("abc",
+                         cascaded_alarm.threshold_rule['query'][0]['value'])
 
         # remove the alarm
         CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
@@ -158,7 +162,7 @@ class APITest(unittest.TestCase):
 
         # cannot change resource
         json['threshold_rule']['query'][0]['value'] = "456"
-        self.assertRaises(Exception,
+        self.assertRaises(exceptions.HttpError,
                           CASCADING_CM_CLIENT.alarms.update,
                           alarm.alarm_id, **json)
         self.assertEqual(alarm, CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id))
@@ -189,7 +193,8 @@ class APITest(unittest.TestCase):
         self.assertEqual(alarm, alarms[0])
 
         alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
-        cascaded_alarm_id = json.loads(alarms[0].description)['cascaded_alarm_id']
+        cascaded_alarm_id = (json.loads(alarms[0].description)
+                             .get('cascaded_alarm_id'))
 
         # remove the alarm
         CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
@@ -204,10 +209,10 @@ class APITest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    print "=" * 79
-    print "Ensure you have at least one ACTIVE vm in cascaded node:",
-    print CASCADED_CM_ENDPOINT
-    print "If there is a 500 error, check if resources have not been cleaned"
-    print "=" * 79
+    print("=" * 79)
+    print("Ensure you have at least one ACTIVE vm in cascaded node: %s" %
+          CASCADED_CM_ENDPOINT)
+    print("If there is a 500 error, check if resources have not been cleaned")
+    print("=" * 79)
     suite = unittest.TestLoader().loadTestsFromTestCase(APITest)
     unittest.TextTestRunner(verbosity=2).run(suite)
