@@ -998,47 +998,8 @@ class MeterController(rest.RestController):
         if not region:
             raise Exception("cascaded region not found")
 
-        _ksclient = ksclient.Client(
-            username=cfg.CONF.service_credentials.os_username,
-            password=cfg.CONF.service_credentials.os_password,
-            tenant_id=cfg.CONF.service_credentials.os_tenant_id,
-            tenant_name=cfg.CONF.service_credentials.os_tenant_name,
-            cacert=cfg.CONF.service_credentials.os_cacert,
-            auth_url=cfg.CONF.service_credentials.os_auth_url,
-            region_name=cfg.CONF.service_credentials.os_region_name,
-            insecure=cfg.CONF.service_credentials.insecure,)
-
-        ceilometer_service_id = []
-        for service in _ksclient.services.list():
-            if service.type == 'metering' and service.enabled is True:
-                ceilometer_service_id.append(service.id)
-
-        if not ceilometer_service_id:
-            raise Exception("No metering service found")
-        if len(ceilometer_service_id) > 1:
-            raise Exception("Multiple metering service found")
-        ceilometer_service_id = ceilometer_service_id[0]
-
-        cascaded_ceilometer_url = []
-        for endpoint in _ksclient.endpoints.list():
-            if (endpoint.region == region
-                and endpoint.service_id == ceilometer_service_id
-                and endpoint.enabled is True):
-                cascaded_ceilometer_url.append(endpoint.publicurl)
-
-        if not cascaded_ceilometer_url:
-            raise Exception("Cascaded ceilometer for %s not found" % region)
-        if len(cascaded_ceilometer_url) > 1:
-            raise Exception(("Region %s exists multiple "
-                             "cascaded ceilometer: %s") % (
-                            cascaded_ceilometer_url, region))
-        cascaded_ceilometer_url = cascaded_ceilometer_url[0]
-
-        kwargs = {
-            "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
-            "ceilometer_url": cascaded_ceilometer_url,
-        }
-        _cmclient = cmclient.get_client(2, **kwargs)
+        cascaded_ceilometer_url = _get_cm_endpoint_by_region(region)
+        _cmclient = _get_cm_client_by_endpoint(cascaded_ceilometer_url)
 
         queries = []
         for query in q:
@@ -1169,47 +1130,8 @@ class MeterController(rest.RestController):
         if not region:
             raise Exception("cascaded region not found")
 
-        _ksclient = ksclient.Client(
-            username=cfg.CONF.service_credentials.os_username,
-            password=cfg.CONF.service_credentials.os_password,
-            tenant_id=cfg.CONF.service_credentials.os_tenant_id,
-            tenant_name=cfg.CONF.service_credentials.os_tenant_name,
-            cacert=cfg.CONF.service_credentials.os_cacert,
-            auth_url=cfg.CONF.service_credentials.os_auth_url,
-            region_name=cfg.CONF.service_credentials.os_region_name,
-            insecure=cfg.CONF.service_credentials.insecure,)
-
-        ceilometer_service_id = []
-        for service in _ksclient.services.list():
-            if service.type == 'metering' and service.enabled is True:
-                ceilometer_service_id.append(service.id)
-
-        if not ceilometer_service_id:
-            raise Exception("No metering service found")
-        if len(ceilometer_service_id) > 1:
-            raise Exception("Multiple metering service found")
-        ceilometer_service_id = ceilometer_service_id[0]
-
-        cascaded_ceilometer_url = []
-        for endpoint in _ksclient.endpoints.list():
-            if (endpoint.region == region
-                and endpoint.service_id == ceilometer_service_id
-                and endpoint.enabled is True):
-                cascaded_ceilometer_url.append(endpoint.publicurl)
-
-        if not cascaded_ceilometer_url:
-            raise Exception("Cascaded ceilometer for %s not found" % region)
-        if len(cascaded_ceilometer_url) > 1:
-            raise Exception(("Region %s exists multiple "
-                             "cascaded ceilometer: %s") % (
-                            cascaded_ceilometer_url, region))
-        cascaded_ceilometer_url = cascaded_ceilometer_url[0]
-
-        kwargs = {
-            "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
-            "ceilometer_url": cascaded_ceilometer_url,
-        }
-        _cmclient = cmclient.get_client(2, **kwargs)
+        cascaded_ceilometer_url = _get_cm_endpoint_by_region(region)
+        _cmclient = _get_cm_client_by_endpoint(cascaded_ceilometer_url)
 
         queries = []
         for query in q:
@@ -2470,47 +2392,8 @@ class AlarmsController(rest.RestController):
         if not region:
             raise Exception("cascaded region not found")
 
-        _ksclient = ksclient.Client(
-            username=cfg.CONF.service_credentials.os_username,
-            password=cfg.CONF.service_credentials.os_password,
-            tenant_id=cfg.CONF.service_credentials.os_tenant_id,
-            tenant_name=cfg.CONF.service_credentials.os_tenant_name,
-            cacert=cfg.CONF.service_credentials.os_cacert,
-            auth_url=cfg.CONF.service_credentials.os_auth_url,
-            region_name=cfg.CONF.service_credentials.os_region_name,
-            insecure=cfg.CONF.service_credentials.insecure,)
-
-        ceilometer_service_id = []
-        for service in _ksclient.services.list():
-            if service.type == 'metering' and service.enabled is True:
-                ceilometer_service_id.append(service.id)
-
-        if not ceilometer_service_id:
-            raise Exception("No metering service found")
-        if len(ceilometer_service_id) > 1:
-            raise Exception("Multiple metering service found")
-        ceilometer_service_id = ceilometer_service_id[0]
-
-        cascaded_ceilometer_url = []
-        for endpoint in _ksclient.endpoints.list():
-            if (endpoint.region == region
-                and endpoint.service_id == ceilometer_service_id
-                and endpoint.enabled is True):
-                cascaded_ceilometer_url.append(endpoint.publicurl)
-
-        if not cascaded_ceilometer_url:
-            raise Exception("Cascaded ceilometer for %s not found" % region)
-        if len(cascaded_ceilometer_url) > 1:
-            raise Exception(("Region %s exists multiple "
-                             "cascaded ceilometer: %s") % (
-                            cascaded_ceilometer_url, region))
-        cascaded_ceilometer_url = cascaded_ceilometer_url[0]
-
-        kwargs = {
-            "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
-            "ceilometer_url": cascaded_ceilometer_url,
-        }
-        _cmclient = cmclient.get_client(2, **kwargs)
+        cascaded_ceilometer_url = _get_cm_endpoint_by_region(region)
+        _cmclient = _get_cm_client_by_endpoint(cascaded_ceilometer_url)
 
         kwargs = data.as_dict(alarm_models.Alarm)
         kwargs['threshold_rule'] = kwargs.pop('rule')
