@@ -74,7 +74,16 @@ ALARM_API_OPTS = [
                ),
 ]
 
+CASCADING_OPTS = [
+    cfg.StrOpt('alarm_metadata_region_key',
+               default='OS-EXT-AZ.availability_zone',
+               help='Create an alarm in which region idendicated by metadata '
+                    'key name, server for heat auto scaling feature.'
+               ),
+]
+
 cfg.CONF.register_opts(ALARM_API_OPTS, group='alarm')
+cfg.CONF.register_opts(CASCADING_OPTS, group='cascading')
 
 state_kind = ["ok", "alarm", "insufficient data"]
 state_kind_enum = wtypes.Enum(str, *state_kind)
@@ -2180,16 +2189,68 @@ class AlarmController(rest.RestController):
         if data.type != "threshold":
             raise ClientSideError("NotImplementedError for %s type", data.type)
 
-        resource_query = None
+        az_query = None
         for query in data.threshold_rule.query:
             if query.field in ('resource', 'resource_id'):
-                resource_query = query
                 return self._put_single_resource_based_alarm(data, query)
+            if query.field == 'metadata.' + cfg.CONF.cascading.alarm_metadata_region_key:
+                az_query = query
+
+        if az_query:
+            return self._put_az_based_alarm(data, az_query)
 
         msg = ("Only support single resource based alarm and heat auto "
-               "scaling alarm, you need to specify resource_id or "
-               "OS-EXT-AZ.availability_zone in query")
+               "scaling alarm, you need to specify resource_id or metadata.%s "
+               "in query" % cfg.CONF.cascading.alarm_metadata_region_key)
         raise ClientSideError(msg)
+
+    def _put_az_based_alarm(self, data, az_query):
+        # Ensure alarm exists
+        alarm = self._alarm()
+        desc = json.loads(alarm.description)
+        cascaded_alarm_id = desc['cascaded_alarm_id']
+
+        # remove the metadata az query, because cascaded level may cannot
+        # handle it
+        query = []
+        for q in data.threshold_rule.query:
+            if q.field == az_query.field:
+                continue
+            query.append(q)
+        data.threshold_rule.query = query
+
+        region = _get_region_by_az(az_query.value)
+        cascaded_ceilometer_url = _get_cm_endpoint_by_region(region)
+        _cmclient = _get_cm_client_by_endpoint(cascaded_ceilometer_url)
+
+        kwargs = data.as_dict(alarm_models.Alarm)
+        kwargs['threshold_rule'] = kwargs.pop('rule')
+        kwargs.pop('alarm_id')
+        cascaded_alarm = _cmclient.alarms.update(cascaded_alarm_id, **kwargs)
+        LOG.info("Updated cascaded alarm is : %s" % cascaded_alarm.to_dict())
+
+        kwargs = cascaded_alarm.to_dict()
+        kwargs['state_timestamp'] = timeutils.parse_strtime(
+            kwargs['state_timestamp'])
+        kwargs['timestamp'] = timeutils.parse_strtime(kwargs['timestamp'])
+        kwargs['rule'] = kwargs.pop('threshold_rule')
+        cascaded_alarm_desc = kwargs['description']
+        kwargs['description'] = json.dumps({
+            "cascaded_alarm_id": kwargs['alarm_id'],
+            "region": desc['region'],
+            "cascaded_ceilometer_url": desc['cascaded_ceilometer_url'],
+            "description": cascaded_alarm_desc,})
+        kwargs['alarm_id'] = alarm.alarm_id
+
+        try:
+            alarm_internal = alarm_models.Alarm(**kwargs)
+        except Exception:
+            LOG.exception(_("Error while putting alarm: %s") % kwargs)
+            raise ClientSideError(_("Alarm incorrect"))
+        alarm = self.conn.update_alarm(alarm_internal)
+
+        kwargs['description'] = cascaded_alarm_desc
+        return Alarm(**kwargs)
 
     def _put_single_resource_based_alarm(self, data, resource_query):
         # Ensure alarm exists
@@ -2203,14 +2264,15 @@ class AlarmController(rest.RestController):
                                       "delete it then create a new one")
 
         desc = json.loads(alarm.description)
-        cascaded_alarm_id = desc['cascadekd_alarm_id']
-        cascaded_resource_id = desc['query.resource_id']
+        cascaded_alarm_id = desc['cascaded_alarm_id']
+        cascaded_resource_id = desc['cascaded.query.resource_id']
 
         _cmclient = self._get_cascaded_cm_client(alarm)
 
         resource_query.value = cascaded_resource_id
         kwargs = data.as_dict(alarm_models.Alarm)
         kwargs['threshold_rule'] = kwargs.pop('rule')
+        kwargs.pop('alarm_id')
         cascaded_alarm = _cmclient.alarms.update(cascaded_alarm_id, **kwargs)
         LOG.info("Updated cascaded alarm is : %s" % cascaded_alarm.to_dict())
 
@@ -2226,7 +2288,7 @@ class AlarmController(rest.RestController):
         kwargs['description'] = json.dumps({
             "cascaded_alarm_id": kwargs['alarm_id'],
             "region": desc['region'],
-            "query.resource_id": resource_id,
+            "cascaded.query.resource_id": cascaded_resource_id,
             "cascaded_ceilometer_url": desc['cascaded_ceilometer_url'],
             "description": cascaded_alarm_desc,})
         kwargs['alarm_id'] = alarm.alarm_id
@@ -2323,23 +2385,32 @@ class AlarmsController(rest.RestController):
         if data.type == 'group':
             raise ClientSideError("NotImplementedError for group type")
 
-        az = None
+        az_query = None
         for query in data.threshold_rule.query:
             if query.field in ('resource', 'resource_id'):
                 return self._create_single_resource_based_alarm(data, query)
-            if query.field == 'metadata.OS-EXT-AZ.availability_zone':
-                az = query.value
+            if query.field == 'metadata.' + cfg.CONF.cascading.alarm_metadata_region_key:
+                az_query = query
 
-        if az:
-            return self._create_az_based_alarm(data, az)
+        if az_query:
+            return self._create_az_based_alarm(data, az_query)
 
         msg = ("Only support single resource based alarm and heat auto "
-               "scaling alarm, you need to specify resource_id or "
-               "OS-EXT-AZ.availability_zone in query")
+               "scaling alarm, you need to specify resource_id or metadata.%s "
+               "in query" % cfg.CONF.cascading.alarm_metadata_region_key)
         raise ClientSideError(msg)
 
-    def _create_az_based_alarm(self, data, az):
-        region = _get_region_by_az(az)
+    def _create_az_based_alarm(self, data, az_query):
+        # remove the metadata az query, because cascaded level may cannot
+        # handle it
+        query = []
+        for q in data.threshold_rule.query:
+            if q.field == az_query.field:
+                continue
+            query.append(q)
+        data.threshold_rule.query = query
+
+        region = _get_region_by_az(az_query.value)
         cascaded_ceilometer_url = _get_cm_endpoint_by_region(region)
         _cmclient = _get_cm_client_by_endpoint(cascaded_ceilometer_url)
 

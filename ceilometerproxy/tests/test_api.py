@@ -57,6 +57,16 @@ class APITest(unittest.TestCase):
         }
         self.alarm_conn = storage.get_connection_from_config(
             cfg.CONF, purpose='alarm')
+        self.conn = storage.get_connection_from_config(
+            cfg.CONF, purpose='metering')
+        # ensure dataset is empty
+        self.alarm_conn.db.alarm.remove({})
+        self.conn.db.resource.remove({})
+
+    def tearDown(self):
+        # ensure dataset is empty even test fails
+        self.alarm_conn.db.alarm.remove({})
+        self.conn.db.resource.remove({})
 
     def test_post_sample_create_delete_resource(self):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
@@ -146,7 +156,7 @@ class APITest(unittest.TestCase):
     def test_resource_based_alarm_put(self):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
 
-        json = {
+        data = {
             "name": "alarm-test",
             "type": "threshold",
             "threshold_rule": {
@@ -158,13 +168,24 @@ class APITest(unittest.TestCase):
                 }]
             }
         }
-        alarm = CASCADING_CM_CLIENT.alarms.create(**json)
+        alarm = CASCADING_CM_CLIENT.alarms.create(**data)
+
+        alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
+        cascaded_alarm_id = (json.loads(alarms[0].description)
+                             .get('cascaded_alarm_id'))
+
+        data['threshold_rule']['threshold'] = 100
+        CASCADING_CM_CLIENT.alarms.update(alarm.alarm_id, **data)
+        alarm = CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id)
+        c_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
+        self.assertEqual(100, alarm.threshold_rule['threshold'])
+        self.assertEqual(100, c_alarm.threshold_rule['threshold'])
 
         # cannot change resource
-        json['threshold_rule']['query'][0]['value'] = "456"
+        data['threshold_rule']['query'][0]['value'] = "456"
         self.assertRaises(exceptions.HttpError,
                           CASCADING_CM_CLIENT.alarms.update,
-                          alarm.alarm_id, **json)
+                          alarm.alarm_id, **data)
         self.assertEqual(alarm, CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id))
 
         # remove the alarm
@@ -175,7 +196,7 @@ class APITest(unittest.TestCase):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
 
     def test_az_based_alarm(self):
-        alarm = {
+        data = {
             "name": "alarm-test",
             "type": "threshold",
             "threshold_rule": {
@@ -187,14 +208,27 @@ class APITest(unittest.TestCase):
                 }]
             }
         }
-        alarm = CASCADING_CM_CLIENT.alarms.create(**alarm)
+        alarm = CASCADING_CM_CLIENT.alarms.create(**data)
         alarms = CASCADING_CM_CLIENT.alarms.list()
         self.assertEqual(1, len(alarms))
         self.assertEqual(alarm, alarms[0])
 
+        # test alarm query has removed az info
+        for query in alarm.threshold_rule['query']:
+            self.assertNotEqual(query.field,
+                                "metadata.OS-EXT-AZ.availability_zone")
+
         alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
         cascaded_alarm_id = (json.loads(alarms[0].description)
                              .get('cascaded_alarm_id'))
+
+        # test put alarm
+        data['threshold_rule']['threshold'] = 100
+        CASCADING_CM_CLIENT.alarms.update(alarm.alarm_id, **data)
+        alarm = CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id)
+        c_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
+        self.assertEqual(100, alarm.threshold_rule['threshold'])
+        self.assertEqual(100, c_alarm.threshold_rule['threshold'])
 
         # remove the alarm
         CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
@@ -210,6 +244,7 @@ class APITest(unittest.TestCase):
 
 if __name__ == '__main__':
     print("=" * 79)
+    print("WARNING: MongoDB will be cleared after this test finish!!")
     print("Ensure you have at least one ACTIVE vm in cascaded node: %s" %
           CASCADED_CM_ENDPOINT)
     print("If there is a 500 error, check if resources have not been cleaned")
