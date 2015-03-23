@@ -59,14 +59,14 @@ class APITest(unittest.TestCase):
             cfg.CONF, purpose='alarm')
         self.conn = storage.get_connection_from_config(
             cfg.CONF, purpose='metering')
-        # ensure dataset is empty
-        self.alarm_conn.db.alarm.remove({})
-        self.conn.db.resource.remove({})
+        # Danger! ensure dataset is empty
+        #self.alarm_conn.db.alarm.remove({})
+        #self.conn.db.resource.remove({})
 
     def tearDown(self):
-        # ensure dataset is empty even test fails
-        self.alarm_conn.db.alarm.remove({})
-        self.conn.db.resource.remove({})
+        # Danger! ensure dataset is empty even test fails
+        #self.alarm_conn.db.alarm.remove({})
+        #self.conn.db.resource.remove({})
 
     def test_post_sample_create_delete_resource(self):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
