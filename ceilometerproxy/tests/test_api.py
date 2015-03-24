@@ -30,12 +30,14 @@ TOKEN = ks_client.Client(
 CASCADING_CM_CLIENT = cm_client.get_client(
     version=2,
     os_auth_token=TOKEN,
-    ceilometer_url=CASCADING_CM_ENDPOINT)
+    ceilometer_url=CASCADING_CM_ENDPOINT,
+    insecure=cfg.CONF.service_credentials.insecure)
 
 CASCADED_CM_CLIENT = cm_client.get_client(
     version=2,
     os_auth_token=TOKEN,
-    ceilometer_url=CASCADED_CM_ENDPOINT)
+    ceilometer_url=CASCADED_CM_ENDPOINT,
+    insecure=cfg.CONF.service_credentials.insecure)
 
 
 class APITest(unittest.TestCase):
@@ -67,10 +69,15 @@ class APITest(unittest.TestCase):
         # Danger! ensure dataset is empty even test fails
         #self.alarm_conn.db.alarm.remove({})
         #self.conn.db.resource.remove({})
+        pass
 
     def test_post_sample_create_delete_resource(self):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
-        resources = CASCADING_CM_CLIENT.resources.list()
+        query = {
+            "field": "resource_id",
+            "value": "123"
+        }
+        resources = CASCADING_CM_CLIENT.resources.list(q=[query])
         self.assertEqual(1, len(resources))
         self.assertEqual("123", resources[0].resource_id)
         # meter links is enabled, so it should be several links
@@ -79,7 +86,7 @@ class APITest(unittest.TestCase):
         # remove it
         self.sample['resource_metadata'] = {}
         CASCADING_CM_CLIENT.samples.create(**self.sample)
-        resources = CASCADING_CM_CLIENT.resources.list()
+        resources = CASCADING_CM_CLIENT.resources.list(q=[query])
         self.assertEqual(0, len(resources))
 
     def test_get_samples_and_statistics_from_cascaded(self):
@@ -106,7 +113,7 @@ class APITest(unittest.TestCase):
         # remove it
         self.sample['resource_metadata'] = {}
         CASCADING_CM_CLIENT.samples.create(**self.sample)
-        resources = CASCADING_CM_CLIENT.resources.list()
+        resources = CASCADING_CM_CLIENT.resources.list(q=[resource_query])
         self.assertEqual(0, len(resources))
 
     def test_single_resource_based_alarm(self):
@@ -125,7 +132,7 @@ class APITest(unittest.TestCase):
             }
         }
         alarm = CASCADING_CM_CLIENT.alarms.create(**alarm)
-        alarms = CASCADING_CM_CLIENT.alarms.list()
+        alarms = CASCADING_CM_CLIENT.alarms.list(q=[{"field": "name", "value": "alarm-test"}])
         self.assertEqual(1, len(alarms))
         self.assertEqual(alarm, alarms[0])
         self.assertEqual("123", alarm.threshold_rule['query'][0]['value'])
@@ -209,7 +216,7 @@ class APITest(unittest.TestCase):
             }
         }
         alarm = CASCADING_CM_CLIENT.alarms.create(**data)
-        alarms = CASCADING_CM_CLIENT.alarms.list()
+        alarms = CASCADING_CM_CLIENT.alarms.list(q=[{"field": "name", "value": "alarm-test"}])
         self.assertEqual(1, len(alarms))
         self.assertEqual(alarm, alarms[0])
 

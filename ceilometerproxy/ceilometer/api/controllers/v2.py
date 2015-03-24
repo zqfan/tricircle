@@ -174,6 +174,7 @@ def _get_cm_client_by_endpoint(endpoint):
     kwargs = {
         "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
         "ceilometer_url": endpoint,
+        "insecure": cfg.CONF.service_credentials.insecure,
     }
     return cmclient.get_client(2, **kwargs)
 
@@ -1697,8 +1698,8 @@ class ResourcesController(rest.RestController):
             resource=resource_id, project=authorized_project))
         if not resources:
             raise EntityNotFound(_('Resource'), resource_id)
-        resource[0].metadata.pop('region')
-        resource[0].metadata.pop('cascaded_resource_id')
+        resource[0].metadata.pop('region', None)
+        resource[0].metadata.pop('cascaded_resource_id', None)
         return Resource.from_db_and_links(resources[0],
                                           self._resource_links(resource_id))
 
@@ -1713,8 +1714,8 @@ class ResourcesController(rest.RestController):
         kwargs = _query_to_kwargs(q, pecan.request.storage_conn.get_resources)
         resources = []
         for resource in pecan.request.storage_conn.get_resources(**kwargs):
-            resource.metadata.pop('region')
-            resource.metadata.pop('cascaded_resource_id')
+            resource.metadata.pop('region', None)
+            resource.metadata.pop('cascaded_resource_id', None)
             resource_link = self._resource_links(resource.resource_id, meter_links)
             resource = Resource.from_db_and_links(resource, resource_link)
             resources.append(resource)
@@ -2153,6 +2154,7 @@ class AlarmController(rest.RestController):
         kwargs = {
             "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
             "ceilometer_url": cascaded_ceilometer_url,
+            "insecure": cfg.CONF.service_credentials.insecure,
         }
         return cmclient.get_client(2, **kwargs)
 
