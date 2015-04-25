@@ -1,225 +1,237 @@
 {
-    "nova.instance": [
-        {
-            "counter_name": "instance",
-            "counter_unit": "instance",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "memory",
-            "counter_unit": "MB",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "memory.usage",
-            "counter_unit": "MB",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "cpu",
-            "counter_unit": "ns",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "cpu_util",
-            "counter_unit": "%",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "vcpus",
-            "counter_unit": "vcpu",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.read.requests",
-            "counter_unit": "request",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.read.requests.rate",
-            "counter_unit": "request/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.write.requests",
-            "counter_unit": "request",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.write.requests.rate",
-            "counter_unit": "request/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.read.bytes",
-            "counter_unit": "B",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.write.bytes",
-            "counter_unit": "B",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.read.bytes.rate",
-            "counter_unit": "B/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.write.bytes.rate",
-            "counter_unit": "B/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.device.read.requests",
-            "counter_unit": "request",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.device.read.requests.rate",
-            "counter_unit": "request/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.device.write.requests",
-            "counter_unit": "request",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.device.write.requests.rate",
-            "counter_unit": "request/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.device.read.bytes",
-            "counter_unit": "B",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.device.write.bytes",
-            "counter_unit": "B",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "disk.device.read.bytes.rate",
-            "counter_unit": "B/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.device.write.bytes.rate",
-            "counter_unit": "B/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.root.size",
-            "counter_unit": "GB",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "disk.ephemeral.size",
-            "counter_unit": "GB",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "network.incoming.bytes",
-            "counter_unit": "B",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "network.outgoing.bytes",
-            "counter_unit": "B",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "network.incoming.bytes.rate",
-            "counter_unit": "B/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "network.outgoing.bytes.rate",
-            "counter_unit": "B/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "network.incoming.packets",
-            "counter_unit": "packet",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "network.outgoing.packets",
-            "counter_unit": "packet",
-            "counter_type": "cumulative"
-        },
-        {
-            "counter_name": "network.incoming.packets.rate",
-            "counter_unit": "packet/s",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "network.outgoing.packets.rate",
-            "counter_unit": "packet/s",
-            "counter_type": "gauge"
-        }
-    ],
-    "glance.image": [
-        {
-            "counter_name": "image",
-            "counter_unit": "image",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "image.size",
-            "counter_unit": "B",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "image.update",
-            "counter_unit": "image",
-            "counter_type": "delta"
-        },
-        {
-            "counter_name": "image.upload",
-            "counter_unit": "image",
-            "counter_type": "delta"
-        },
-        {
-            "counter_name": "image.delete",
-            "counter_unit": "image",
-            "counter_type": "delta"
-        },
-        {
-            "counter_name": "image.download",
-            "counter_unit": "B",
-            "counter_type": "delta"
-        },
-        {
-            "counter_name": "image.serve",
-            "counter_unit": "B",
-            "counter_type": "delta"
-        }
-    ],
-    "cinder.volume": [
-        {
-            "counter_name": "volume",
-            "counter_unit": "volume",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "volume.size",
-            "counter_unit": "GB",
-            "counter_type": "gauge"
-        }
-    ],
-    "cinder.snapshot": [
-        {
-            "counter_name": "snapshot",
-            "counter_unit": "snapshot",
-            "counter_type": "gauge"
-        },
-        {
-            "counter_name": "snapshot.size",
-            "counter_unit": "B",
-            "counter_type": "gauge"
-        }
-    ]
+    "nova.instance": {
+        "source": "EC2",
+        "meter": [
+            {
+                "counter_name": "instance",
+                "counter_unit": "instance",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "memory",
+                "counter_unit": "MB",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "memory.usage",
+                "counter_unit": "MB",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "cpu",
+                "counter_unit": "ns",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "cpu_util",
+                "counter_unit": "%",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "vcpus",
+                "counter_unit": "vcpu",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.read.requests",
+                "counter_unit": "request",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.read.requests.rate",
+                "counter_unit": "request/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.write.requests",
+                "counter_unit": "request",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.write.requests.rate",
+                "counter_unit": "request/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.read.bytes",
+                "counter_unit": "B",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.write.bytes",
+                "counter_unit": "B",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.read.bytes.rate",
+                "counter_unit": "B/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.write.bytes.rate",
+                "counter_unit": "B/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.device.read.requests",
+                "counter_unit": "request",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.device.read.requests.rate",
+                "counter_unit": "request/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.device.write.requests",
+                "counter_unit": "request",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.device.write.requests.rate",
+                "counter_unit": "request/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.device.read.bytes",
+                "counter_unit": "B",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.device.write.bytes",
+                "counter_unit": "B",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "disk.device.read.bytes.rate",
+                "counter_unit": "B/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.device.write.bytes.rate",
+                "counter_unit": "B/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.root.size",
+                "counter_unit": "GB",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "disk.ephemeral.size",
+                "counter_unit": "GB",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "network.incoming.bytes",
+                "counter_unit": "B",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "network.outgoing.bytes",
+                "counter_unit": "B",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "network.incoming.bytes.rate",
+                "counter_unit": "B/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "network.outgoing.bytes.rate",
+                "counter_unit": "B/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "network.incoming.packets",
+                "counter_unit": "packet",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "network.outgoing.packets",
+                "counter_unit": "packet",
+                "counter_type": "cumulative"
+            },
+            {
+                "counter_name": "network.incoming.packets.rate",
+                "counter_unit": "packet/s",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "network.outgoing.packets.rate",
+                "counter_unit": "packet/s",
+                "counter_type": "gauge"
+            }
+        ]
+    },
+    "glance.image": {
+        "source": "AMI",
+        "meter": [
+            {
+                "counter_name": "image",
+                "counter_unit": "image",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "image.size",
+                "counter_unit": "B",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "image.update",
+                "counter_unit": "image",
+                "counter_type": "delta"
+            },
+            {
+                "counter_name": "image.upload",
+                "counter_unit": "image",
+                "counter_type": "delta"
+            },
+            {
+                "counter_name": "image.delete",
+                "counter_unit": "image",
+                "counter_type": "delta"
+            },
+            {
+                "counter_name": "image.download",
+                "counter_unit": "B",
+                "counter_type": "delta"
+            },
+            {
+                "counter_name": "image.serve",
+                "counter_unit": "B",
+                "counter_type": "delta"
+            }
+        ]
+    },
+    "cinder.volume": {
+        "source": "EBS",
+        "meter": [
+            {
+                "counter_name": "volume",
+                "counter_unit": "volume",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "volume.size",
+                "counter_unit": "GB",
+                "counter_type": "gauge"
+            }
+        ]
+    },
+    "cinder.snapshot": {
+        "source": "EBS",
+        "meter": [
+            {
+                "counter_name": "snapshot",
+                "counter_unit": "snapshot",
+                "counter_type": "gauge"
+            },
+            {
+                "counter_name": "snapshot.size",
+                "counter_unit": "B",
+                "counter_type": "gauge"
+            }
+        ]
+    }
 }

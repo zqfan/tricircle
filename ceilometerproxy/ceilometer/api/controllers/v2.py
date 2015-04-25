@@ -76,10 +76,13 @@ ALARM_API_OPTS = [
 
 CASCADING_OPTS = [
     cfg.StrOpt('alarm_metadata_region_key',
-               default='OS-EXT-AZ.availability_zone',
+               default='metering.region',
                help='Create an alarm in which region idendicated by metadata '
                     'key name, server for heat auto scaling feature.'
                ),
+    cfg.BoolOpt('alarm_list_state_sync',
+                default=True,
+                help='Force to sync alarm state when get all alarms'),
 ]
 
 cfg.CONF.register_opts(ALARM_API_OPTS, group='alarm')
@@ -114,9 +117,10 @@ except:
 
 def _get_region_by_az(az):
     try:
-        return _az2region[az]
+        return _az2region.get(az, az)
     except:
         raise ClientSideError("Invalid az name, valid set are: %s", _az2region.keys())
+
 
 _ks_client = None
 def _get_ks_client():
@@ -160,7 +164,7 @@ def _get_cm_endpoint_by_region(region):
             ceilometer_endpoints.append(endpoint.publicurl)
 
     if not ceilometer_endpoints:
-        raise Exception("Cascaded ceilometer for %s not found" % region)
+        raise ClientSideError("Cascaded ceilometer for %s not found" % region)
     if len(ceilometer_endpoints) > 1:
         raise Exception(("Region %s exists multiple "
                          "cascaded ceilometer: %s") % (
@@ -1089,9 +1093,13 @@ class MeterController(rest.RestController):
                 "project_id": sample.project_id,
                 "source": sample.source or pecan.request.cfg.sample_source,
                 "metadata": sample.resource_metadata,
-                "meter": type2meters.get(resource_type, []),
+                "meter": type2meters[resource_type]['meter'],
             }
+
+            source = type2meters[resource_type]['source']
+            resource['metadata'].setdefault('source', source)
             pecan.request.storage_conn.record_resource(resource)
+            LOG.debug("save resource: %s", resource)
 
         # The return result has no sense, just to suit the interface
         return samples
@@ -1223,7 +1231,13 @@ class MetersController(rest.RestController):
 
         :param q: Filter rules for the meters to be returned.
         """
-        raise NotImplementedError()
+        q = q or []
+
+        # Timestamp field is not supported for Meter queries
+        kwargs = _query_to_kwargs(q, pecan.request.storage_conn.get_meters,
+                                  allow_timestamps=False)
+        return [Meter.from_db_model(m)
+                for m in pecan.request.storage_conn.get_meters(**kwargs)]
 
 
 class Sample(_Base):
@@ -1750,7 +1764,8 @@ class ResourcesController(rest.RestController):
         r['_id'] = r.pop('resource_id')
         r.setdefault('user_id', None)
         r.setdefault('project_id', None)
-        r.setdefault('meter', type2meters[resource_type])
+        r.setdefault('meter', type2meters[resource_type]['meter'])
+        r['metadata'].setdefault('source', type2meters[resource_type]['source'])
         pecan.request.storage_conn.record_resource(r)
         return resource
 
@@ -2188,7 +2203,7 @@ class AlarmController(rest.RestController):
         :param data: an alarm within the request body.
         """
 
-        if data.type != "threshold":
+        if data.type == "combination":
             raise ClientSideError("NotImplementedError for %s type", data.type)
 
         az_query = None
@@ -2201,10 +2216,13 @@ class AlarmController(rest.RestController):
         if az_query:
             return self._put_az_based_alarm(data, az_query)
 
-        msg = ("Only support single resource based alarm and heat auto "
-               "scaling alarm, you need to specify resource_id or metadata.%s "
-               "in query" % cfg.CONF.cascading.alarm_metadata_region_key)
-        raise ClientSideError(msg)
+        # no resource id nor region means it should forward to orginal region
+        alarm = self._alarm()
+        desc = json.loads(cascading_alarm.description)
+        cascaded_alarm_id = desc['cascaded_alarm_id']
+        _cmclient = self._get_cascaded_cm_client(cascading_alarm)
+        kwargs = data.as_dict(alarm_models.Alarm)
+        _cmclient.alarms.update(cascaded_alarm_id, **kwargs)
 
     def _put_az_based_alarm(self, data, az_query):
         # Ensure alarm exists
@@ -2323,6 +2341,7 @@ class AlarmController(rest.RestController):
             self.conn.delete_alarm(alarm.alarm_id)
         except Exception as e:
             LOG.error("Failed to delete cascaded alarm because %s", e)
+            raise
         else:
             self.conn.delete_alarm(alarm.alarm_id)
             LOG.debug("delete alarm %s", alarm.alarm_id)
@@ -2382,10 +2401,6 @@ class AlarmsController(rest.RestController):
         """
         if data.type == "combination":
             raise ClientSideError("NotImplementedError for combination type")
-
-        # group type alarm should be created in every cascaded openstack
-        if data.type == 'group':
-            raise ClientSideError("NotImplementedError for group type")
 
         az_query = None
         for query in data.threshold_rule.query:
@@ -2501,6 +2516,17 @@ class AlarmsController(rest.RestController):
         kwargs['description'] = cascaded_alarm_desc
         return Alarm(**kwargs)
 
+    def _get_cascaded_cm_client(self, cascading_alarm):
+        desc = json.loads(cascading_alarm.description)
+        cascaded_ceilometer_url = desc['cascaded_ceilometer_url']
+
+        kwargs = {
+            "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
+            "ceilometer_url": cascaded_ceilometer_url,
+            "insecure": cfg.CONF.service_credentials.insecure,
+        }
+        return cmclient.get_client(2, **kwargs)
+
     @wsme_pecan.wsexpose([Alarm], [Query])
     def get_all(self, q=None):
         """Return all alarms, based on the query provided.
@@ -2517,8 +2543,13 @@ class AlarmsController(rest.RestController):
             try:
                 cascading_des = json.loads(alarm.description)
                 description = cascading_des['description']
+                if cfg.CONF.cascading.alarm_list_state_sync:
+                    LOG.debug('try to sync state of alarm %s', alarm.alarm_id)
+                    _cmclient = self._get_cascaded_cm_client(alarm)
+                    state = _cmclient.alarms.get_state(cascading_des['cascaded_alarm_id'])
+                    alarm.state = state
             except Exception as e:
-                LOG.warn("Description '%s' is not as expected", alarm.description)
+                LOG.warn("Description '%s' is not as expected, %s", alarm.description, e)
             else:
                 alarm.description = description
                 alarms.append(alarm)

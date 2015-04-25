@@ -14,8 +14,9 @@ from ceilometer import storage
 
 cfg.CONF([], project='ceilometer')
 
-CASCADING_CM_ENDPOINT = "http://127.0.0.1:8777"
-CASCADED_CM_ENDPOINT = "http://10.67.148.224:8777"
+CASCADING_CM_ENDPOINT = "https://metering.localdomain.com:8777"
+CASCADED_CM_ENDPOINT = "https://metering.az2.dc21.domainname.com:443"
+REGION = "regionOne"
 
 TOKEN = ks_client.Client(
     username=cfg.CONF.service_credentials.os_username,
@@ -52,7 +53,7 @@ class APITest(unittest.TestCase):
             "project_id": "456",
             "resource_id": "123",
             "resource_metadata": {
-                "region": "regionOne",
+                "region": REGION,
                 "cascaded_resource_id": "abc",
                 "type": "nova.instance"
             }
@@ -210,8 +211,8 @@ class APITest(unittest.TestCase):
                 "threshold": 1,
                 "meter_name": "instance",
                 "query": [{
-                    "field": "metadata.OS-EXT-AZ.availability_zone",
-                    "value": "nova",
+                    "field": "metadata.metering.region",
+                    "value": REGION,
                 }]
             }
         }
@@ -223,7 +224,7 @@ class APITest(unittest.TestCase):
         # test alarm query has removed az info
         for query in alarm.threshold_rule['query']:
             self.assertNotEqual(query.field,
-                                "metadata.OS-EXT-AZ.availability_zone")
+                                "metadata.metering.region")
 
         alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
         cascaded_alarm_id = (json.loads(alarms[0].description)
@@ -247,6 +248,62 @@ class APITest(unittest.TestCase):
         }
         cascaded_alarms = CASCADED_CM_CLIENT.alarms.list(q=[query])
         self.assertEqual(0, len(cascaded_alarms))
+
+    def test_put_alarm_without_resource_nor_region(self):
+        data = {
+            "name": "alarm-test",
+            "type": "threshold",
+            "threshold_rule": {
+                "threshold": 1,
+                "meter_name": "instance",
+                "query": [{
+                    "field": "metadata.metering.region",
+                    "value": REGION,
+                }]
+            }
+        }
+        alarm = CASCADING_CM_CLIENT.alarms.create(**data)
+        data['threshold_rule']['threshold'] = 100
+        data['threshold_rule']['query'] = []
+        CASCADING_CM_CLIENT.alarms.update(alarm.alarm_id, **data)
+        alarm = CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id)
+        self.assertEqual(100, alarm.threshold_rule['threshold'])
+        self.assertEqual([], alarm.threshold_rule['query'])
+
+        alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
+        cascaded_alarm_id = (json.loads(alarms[0].description)
+                             .get('cascaded_alarm_id'))
+        c_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
+        self.assertEqual(100, c_alarm.threshold_rule['threshold'])
+        self.assertEqual([], c_alarm.threshold_rule['query'])
+        
+
+    def test_meter_list(self):
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        meters = CASCADING_CM_CLIENT.meters.list()
+        self.assertNotEqual(0, len(meters))
+        # remove the resource
+        self.sample['resource_metadata'] = {}
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+
+    def test_post_same_sample_multiple_times(self):
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        query = {
+            "field": "resource_id",
+            "value": "123"
+        }
+        resources = CASCADING_CM_CLIENT.resources.list(q=[query])
+        self.assertEqual(1, len(resources))
+        # remove the resource
+        self.sample['resource_metadata'] = {}
+        CASCADING_CM_CLIENT.samples.create(**self.sample)
+        query = {
+            "field": "resource_id",
+            "value": "123"
+        }
+        resources = CASCADING_CM_CLIENT.resources.list(q=[query])
+        self.assertEqual(0, len(resources))
 
 
 if __name__ == '__main__':
