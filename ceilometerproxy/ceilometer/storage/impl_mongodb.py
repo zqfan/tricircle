@@ -479,6 +479,10 @@ class Connection(pymongo_base.Connection):
         :param data: a dictionary such as returned by
                      ceilometer.meter.meter_message_from_counter
         """
+        # for cascading level, collector will update resource's metadata then
+        # break the data send by nova, cinder and etc
+        return
+
         # Record the updated resource metadata - we use $setOnInsert to
         # unconditionally insert sample timestamps and resource metadata
         # (in the update case, this must be conditional on the sample not

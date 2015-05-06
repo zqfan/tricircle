@@ -81,6 +81,7 @@ To avoid couple with Ceilometer, you can use a configure option to indicates whe
         ...
         self.cm_client = None
         if cfg.CONF.ceilometer_enabled:
+            # important, add timeout parameter to avoid ridiculous keep alive issue
             self.cm_client = ceilometerclient.client.get_client(2, xxx)
 
     def vm_create(self, xxx):

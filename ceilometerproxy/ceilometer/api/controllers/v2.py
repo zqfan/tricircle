@@ -134,7 +134,8 @@ def _get_ks_client():
             cacert=cfg.CONF.service_credentials.os_cacert,
             auth_url=cfg.CONF.service_credentials.os_auth_url,
             region_name=cfg.CONF.service_credentials.os_region_name,
-            insecure=cfg.CONF.service_credentials.insecure,)
+            insecure=cfg.CONF.service_credentials.insecure,
+            timeout=cfg.CONF.http_timeout)
     return _ks_client
 
 
@@ -179,6 +180,7 @@ def _get_cm_client_by_endpoint(endpoint):
         "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
         "ceilometer_url": endpoint,
         "insecure": cfg.CONF.service_credentials.insecure,
+        "timeout": cfg.CONF.http_timeout,
     }
     return cmclient.get_client(2, **kwargs)
 
@@ -344,7 +346,6 @@ class Query(_Base):
     field = wtypes.text
     "The name of the field to test"
 
-    # op = wsme.wsattr(operation_kind, default='eq')
     # this ^ doesn't seem to work.
     op = wsme.wsproperty(operation_kind_enum, get_op, set_op)
     "The comparison operator. Defaults to 'eq'."
@@ -2170,6 +2171,7 @@ class AlarmController(rest.RestController):
             "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
             "ceilometer_url": cascaded_ceilometer_url,
             "insecure": cfg.CONF.service_credentials.insecure,
+            "timeout": cfg.CONF.http_timeout,
         }
         return cmclient.get_client(2, **kwargs)
 
@@ -2217,12 +2219,38 @@ class AlarmController(rest.RestController):
             return self._put_az_based_alarm(data, az_query)
 
         # no resource id nor region means it should forward to orginal region
-        alarm = self._alarm()
+        cascading_alarm = self._alarm()
         desc = json.loads(cascading_alarm.description)
         cascaded_alarm_id = desc['cascaded_alarm_id']
         _cmclient = self._get_cascaded_cm_client(cascading_alarm)
         kwargs = data.as_dict(alarm_models.Alarm)
-        _cmclient.alarms.update(cascaded_alarm_id, **kwargs)
+        kwargs.pop('alarm_id', None)
+        kwargs['threshold_rule'] = kwargs.pop('rule')
+        cascaded_alarm = _cmclient.alarms.update(cascaded_alarm_id, **kwargs)
+        LOG.info("Updated cascaded alarm is : %s" % cascaded_alarm.to_dict())
+
+        kwargs = cascaded_alarm.to_dict()
+        kwargs['state_timestamp'] = timeutils.parse_strtime(
+            kwargs['state_timestamp'])
+        kwargs['timestamp'] = timeutils.parse_strtime(kwargs['timestamp'])
+        kwargs['rule'] = kwargs.pop('threshold_rule')
+        cascaded_alarm_desc = kwargs['description']
+        kwargs['description'] = json.dumps({
+            "cascaded_alarm_id": kwargs['alarm_id'],
+            "region": desc['region'],
+            "cascaded_ceilometer_url": desc['cascaded_ceilometer_url'],
+            "description": cascaded_alarm_desc,})
+        kwargs['alarm_id'] = cascading_alarm.alarm_id
+
+        try:
+            alarm_internal = alarm_models.Alarm(**kwargs)
+        except Exception:
+            LOG.exception(_("Error while putting alarm: %s") % kwargs)
+            raise ClientSideError(_("Alarm incorrect"))
+        alarm = self.conn.update_alarm(alarm_internal)
+
+        kwargs['description'] = cascaded_alarm_desc
+        return Alarm(**kwargs)
 
     def _put_az_based_alarm(self, data, az_query):
         # Ensure alarm exists
@@ -2524,6 +2552,7 @@ class AlarmsController(rest.RestController):
             "os_auth_token": pecan.request.headers.get('X-Auth-Token'),
             "ceilometer_url": cascaded_ceilometer_url,
             "insecure": cfg.CONF.service_credentials.insecure,
+            "timeout": cfg.CONF.http_timeout,
         }
         return cmclient.get_client(2, **kwargs)
 

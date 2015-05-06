@@ -6,7 +6,6 @@ import unittest
 
 from ceilometerclient import client as cm_client
 from ceilometerclient.openstack.common.apiclient import exceptions
-from keystoneclient.v2_0 import client as ks_client
 from oslo.config import cfg
 
 from ceilometer import service  # noqa
@@ -14,36 +13,34 @@ from ceilometer import storage
 
 cfg.CONF([], project='ceilometer')
 
-CASCADING_CM_ENDPOINT = "https://metering.localdomain.com:8777"
-CASCADED_CM_ENDPOINT = "https://metering.az2.dc21.domainname.com:443"
+CASCADING_REGION = cfg.CONF.service_credentials.os_region_name or 'Region.Cascading'
 REGION = "regionOne"
 
-TOKEN = ks_client.Client(
+CASCADING_CM_CLIENT = cm_client.get_client(
+    version=2,
     username=cfg.CONF.service_credentials.os_username,
     password=cfg.CONF.service_credentials.os_password,
-    tenant_id=cfg.CONF.service_credentials.os_tenant_id,
     tenant_name=cfg.CONF.service_credentials.os_tenant_name,
     cacert=cfg.CONF.service_credentials.os_cacert,
     auth_url=cfg.CONF.service_credentials.os_auth_url,
     region_name=cfg.CONF.service_credentials.os_region_name,
-    insecure=cfg.CONF.service_credentials.insecure,).auth_token
-
-CASCADING_CM_CLIENT = cm_client.get_client(
-    version=2,
-    os_auth_token=TOKEN,
-    ceilometer_url=CASCADING_CM_ENDPOINT,
     insecure=cfg.CONF.service_credentials.insecure)
 
 CASCADED_CM_CLIENT = cm_client.get_client(
     version=2,
-    os_auth_token=TOKEN,
-    ceilometer_url=CASCADED_CM_ENDPOINT,
+    username=cfg.CONF.service_credentials.os_username,
+    password=cfg.CONF.service_credentials.os_password,
+    tenant_name=cfg.CONF.service_credentials.os_tenant_name,
+    cacert=cfg.CONF.service_credentials.os_cacert,
+    auth_url=cfg.CONF.service_credentials.os_auth_url,
+    region_name=REGION,
     insecure=cfg.CONF.service_credentials.insecure)
 
 
 class APITest(unittest.TestCase):
 
     def setUp(self):
+        # put it here so each test case can modify but don't recover it
         self.sample = {
             "counter_name": "foo",
             "counter_type": "gauge",
@@ -203,7 +200,7 @@ class APITest(unittest.TestCase):
         self.sample['resource_metadata'] = {}
         CASCADING_CM_CLIENT.samples.create(**self.sample)
 
-    def test_az_based_alarm(self):
+    def test_az_based_alarm_create(self):
         data = {
             "name": "alarm-test",
             "type": "threshold",
@@ -230,14 +227,6 @@ class APITest(unittest.TestCase):
         cascaded_alarm_id = (json.loads(alarms[0].description)
                              .get('cascaded_alarm_id'))
 
-        # test put alarm
-        data['threshold_rule']['threshold'] = 100
-        CASCADING_CM_CLIENT.alarms.update(alarm.alarm_id, **data)
-        alarm = CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id)
-        c_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
-        self.assertEqual(100, alarm.threshold_rule['threshold'])
-        self.assertEqual(100, c_alarm.threshold_rule['threshold'])
-
         # remove the alarm
         CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
 
@@ -248,6 +237,35 @@ class APITest(unittest.TestCase):
         }
         cascaded_alarms = CASCADED_CM_CLIENT.alarms.list(q=[query])
         self.assertEqual(0, len(cascaded_alarms))
+
+    def test_az_based_alarm_put(self):
+        data = {
+            "name": "alarm-test",
+            "type": "threshold",
+            "threshold_rule": {
+                "threshold": 1,
+                "meter_name": "instance",
+                "query": [{
+                    "field": "metadata.metering.region",
+                    "value": REGION,
+                }]
+            }
+        }
+        alarm = CASCADING_CM_CLIENT.alarms.create(**data)
+
+        alarms = list(self.alarm_conn.get_alarms(alarm_id=alarm.alarm_id))
+        cascaded_alarm_id = (json.loads(alarms[0].description)
+                             .get('cascaded_alarm_id'))
+
+        data['threshold_rule']['threshold'] = 100
+        CASCADING_CM_CLIENT.alarms.update(alarm.alarm_id, **data)
+        alarm = CASCADING_CM_CLIENT.alarms.get(alarm.alarm_id)
+        c_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
+        self.assertEqual(100, alarm.threshold_rule['threshold'])
+        self.assertEqual(100, c_alarm.threshold_rule['threshold'])
+
+        # remove the alarm
+        CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
 
     def test_put_alarm_without_resource_nor_region(self):
         data = {
@@ -276,7 +294,9 @@ class APITest(unittest.TestCase):
         c_alarm = CASCADED_CM_CLIENT.alarms.get(cascaded_alarm_id)
         self.assertEqual(100, c_alarm.threshold_rule['threshold'])
         self.assertEqual([], c_alarm.threshold_rule['query'])
-        
+
+        # remove the alarm
+        CASCADING_CM_CLIENT.alarms.delete(alarm.alarm_id)
 
     def test_meter_list(self):
         CASCADING_CM_CLIENT.samples.create(**self.sample)
@@ -298,20 +318,13 @@ class APITest(unittest.TestCase):
         # remove the resource
         self.sample['resource_metadata'] = {}
         CASCADING_CM_CLIENT.samples.create(**self.sample)
-        query = {
-            "field": "resource_id",
-            "value": "123"
-        }
-        resources = CASCADING_CM_CLIENT.resources.list(q=[query])
-        self.assertEqual(0, len(resources))
 
 
 if __name__ == '__main__':
     print("=" * 79)
-    print("WARNING: MongoDB will be cleared after this test finish!!")
-    print("Ensure you have at least one ACTIVE vm in cascaded node: %s" %
-          CASCADED_CM_ENDPOINT)
-    print("If there is a 500 error, check if resources have not been cleaned")
+    print("Ensure you have at least one ACTIVE vm in cascaded node: %s" % REGION)
+    print("If there is a 500 error, remove resource '123' and alarm 'alarm-test'")
     print("=" * 79)
     suite = unittest.TestLoader().loadTestsFromTestCase(APITest)
+    # python 2.6 doesn't have failfast parameter :(
     unittest.TextTestRunner(verbosity=2).run(suite)
